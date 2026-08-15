@@ -95,9 +95,8 @@ export class FirstPersonCamera {
       if (this.clickLockAllowed) this.requestLock();
     });
     document.addEventListener("pointerlockchange", () => {
-      this.locked = document.pointerLockElement === this.dom;
+this.locked = document.pointerLockElement === this.dom;
       this.postLockLog = 10;
-this.lockGraceUntil = performance.now() + 16;
       if (this.locked) this.skipFirstMove = true;
       this.transitionLog.unshift(
         `LOCK#${this.transitionSeq++} ${this.locked} t=${performance.now().toFixed(0)} ` +
@@ -198,7 +197,6 @@ this.lockGraceUntil = performance.now() + 16;
   }
 
   private requestLock(): Promise<void> | undefined {
-    this.prepareUnlock();
     const el = this.dom as unknown as {
       requestPointerLock(options?: { unadjustedMovement: boolean }): Promise<void> | void;
     };
