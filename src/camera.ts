@@ -71,16 +71,8 @@ export class FirstPersonCamera {
   private mmAccumY = 0;
   /** 忽略锁定瞬间浏览器合成的一次假位移 (首帧 mousemove 不转视角) */
   private skipFirstMove = false;
-  /** 锁定/解锁切换后 100ms 内忽略全部 mousemove 位移 (Chromium 锁定瞬间补送光标归位位移, 单次跳过不可靠) */
+  /** 主动解锁前预置宽限期: 吞掉 exitPointerLock + SetCursorPos 竞态期间 (仍处于锁定态) 的合成位移 */
   private lockGraceUntil = 0;
-  /** 最近一次 mousemove 的光标位置 (诊断: 锁定前位置 vs 锁定后归位位置) */
-  private lastCursorX = 0;
-  private lastCursorY = 0;
-  /** 锁定/解锁切换后连续记录的原始 mousemove 条数 (诊断瞬移, 不节流) */
-  private postLockLog = 0;
-  /** 指针锁定切换诊断日志: LOCK# 事件 + 切换后原始位移 POST 行 (定位"一帧抽"根源) */
-  readonly transitionLog: string[] = [];
-  private transitionSeq = 0;
 
   constructor(camera: THREE.PerspectiveCamera, dom: HTMLElement) {
     this.camera = camera;
@@ -95,33 +87,12 @@ export class FirstPersonCamera {
       if (this.clickLockAllowed) this.requestLock();
     });
     document.addEventListener("pointerlockchange", () => {
-this.locked = document.pointerLockElement === this.dom;
-      this.postLockLog = 10;
+      this.locked = document.pointerLockElement === this.dom;
       if (this.locked) this.skipFirstMove = true;
-      this.transitionLog.unshift(
-        `LOCK#${this.transitionSeq++} ${this.locked} t=${performance.now().toFixed(0)} ` +
-          `cx=${this.lastCursorX.toFixed(0)} cy=${this.lastCursorY.toFixed(0)} ` +
-          `yaw=${this.yaw.toFixed(6)} pitch=${this.pitch.toFixed(6)}`,
-      );
-      if (this.transitionLog.length > 30) this.transitionLog.pop();
     });
     document.addEventListener("mousemove", (ev) => {
-      this.lastCursorX = ev.clientX;
-      this.lastCursorY = ev.clientY;
       if (!this.locked) return;
-      if (this.postLockLog > 0) {
-        this.postLockLog--;
-        const inGrace = performance.now() < this.lockGraceUntil;
-        this.transitionLog.unshift(
-          `LOCK#${this.transitionSeq++} POST t=${performance.now().toFixed(0)} ` +
-            `skip=${this.skipFirstMove} grace=${inGrace} ` +
-            `mX=${ev.movementX.toFixed(1)} mY=${ev.movementY.toFixed(1)} ` +
-            `cx=${ev.clientX.toFixed(0)} cy=${ev.clientY.toFixed(0)} ` +
-            `yaw=${this.yaw.toFixed(6)} pitch=${this.pitch.toFixed(6)}`,
-        );
-        if (this.transitionLog.length > 30) this.transitionLog.pop();
-      }
-      // 锁定/解锁切换后 100ms 内不转视角: 吞掉 Chromium 补送的"光标归位"位移 (诊断行仍记录)
+      // 解锁竞态窗口内 (prepareUnlock 到 pointerlockchange(false) 之间) 不转视角
       if (performance.now() < this.lockGraceUntil) return;
       if (this.skipFirstMove) {
         this.skipFirstMove = false;
@@ -189,13 +160,13 @@ this.locked = document.pointerLockElement === this.dom;
     }
   }
 
-  /** 请求指针锁定: 优先 unadjustedMovement (Chromium 88+ 用原始位移, 绕过锁定瞬间的光标归位假位移),
-   *  平台不支持 (NotSupportedError) 或旧签名时退回普通 requestPointerLock, 保证一定能锁上。 */
-  /** 主动解锁/锁定前先进入宽限期: 吞掉 Chromium 解锁瞬间 (SetCursorPos 竞态) 的合成位移 */
+  /** 主动解锁前先进入宽限期: 吞掉 exitPointerLock + SetCursorPos 竞态期间 (仍处于锁定态) 的合成位移 */
   prepareUnlock(): void {
     this.lockGraceUntil = performance.now() + 100;
   }
 
+  /** 请求指针锁定: 优先 unadjustedMovement (Chromium 88+ 用原始位移, 绕过锁定瞬间的光标归位假位移),
+   *  平台不支持 (NotSupportedError) 或旧签名时退回普通 requestPointerLock, 保证一定能锁上。 */
   private requestLock(): Promise<void> | undefined {
     const el = this.dom as unknown as {
       requestPointerLock(options?: { unadjustedMovement: boolean }): Promise<void> | void;
@@ -203,11 +174,7 @@ this.locked = document.pointerLockElement === this.dom;
     try {
       const result = el.requestPointerLock({ unadjustedMovement: true });
       if (result && typeof (result as Promise<void>).catch === "function") {
-        return (result as Promise<void>).catch(() => {
-          this.transitionLog.unshift(`LOCK#${this.transitionSeq++} UNLOCK unadjusted被拒 -> 退回普通锁定`);
-          if (this.transitionLog.length > 30) this.transitionLog.pop();
-          return el.requestPointerLock() as Promise<void>;
-        });
+        return (result as Promise<void>).catch(() => el.requestPointerLock() as Promise<void>);
       }
     } catch {
       // options 参数不被支持: 退回普通锁定

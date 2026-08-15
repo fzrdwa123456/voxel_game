@@ -217,7 +217,6 @@ let lastEmbedSeq = 0;
 let lastWallhSeq = 0;
 let lastBurstCount = 0;
 let lastMouseSeq = 0;
-let lastTransitionSeq = 0;
 
 function renderFrame(): void {
   timer.update();
@@ -310,15 +309,6 @@ function renderFrame(): void {
       if (m && Number(m[1]) > lastMouseSeq) {
         sendLog(line);
         lastMouseSeq = Number(m[1]);
-      }
-    }
-
-    // 转发指针锁定切换诊断日志 (LOCK#序号 递增: 切换基准 + 切换后原始位移)
-    for (const line of fps.transitionLog) {
-      const m = /^LOCK#(\d+)/.exec(line);
-      if (m && Number(m[1]) > lastTransitionSeq) {
-        sendLog(line);
-        lastTransitionSeq = Number(m[1]);
       }
     }
 
