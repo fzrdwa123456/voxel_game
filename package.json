@@ -1,0 +1,19 @@
+{
+  "name": "voxelenginenwweb",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build && node scripts/rearrange.mjs && gcc -O2 -municode -mwindows -o release/VoxelEngineNWWeb/launcher.exe launcher/launcher.c && gcc -O2 -mwindows -o release/VoxelEngineNWWeb/game/core/cursor.exe launcher/cursor.c",
+    "get-nw": "node scripts/get-nw.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/three": "^0.185.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  }
+}

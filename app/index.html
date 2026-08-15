@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>VoxelEngine NW.js 自检</title>
+<style>
+  html, body { margin: 0; background: #000; color: #eee; font: 13px/1.7 Consolas, monospace; height: 100%; }
+  #panel { position: fixed; left: 8px; top: 8px; width: 460px; background: rgba(0,0,0,.8); border: 1px solid #333; padding: 10px 14px; border-radius: 6px; white-space: pre; }
+  #lockbox { position: fixed; inset: 0; }
+  #hint { position: fixed; right: 14px; bottom: 12px; color: #999; font: 12px/1.6 Consolas, monospace; text-align: right; }
+  .ok { color: #7f7; } .bad { color: #f77; }
+</style>
+</head>
+<body>
+<div id="lockbox"></div>
+<div id="panel"></div>
+<div id="hint">点击画面锁定鼠标（验证锁定/ESC 行为）<br>点击后按 ESC：应显示"ESC 拦截"且保持锁定</div>
+<script>
+// ===== NW.js 基础框架自检 =====
+// 渲染层直接可用 Node（无需 preload/IPC）: require/process/nw 均可用
+const fs = require("fs");
+const path = require("path");
+
+const out = [];
+const ok = (t) => out.push(`[OK]   ${t}`);
+const bad = (t) => out.push(`[BAD]  ${t}`);
+const info = (t) => out.push(`[INFO] ${t}`);
+
+function logLine(s) {
+  out.push(s);
+  document.getElementById("panel").textContent = out.join("\n");
+}
+
+// 1. Node / 版本自检
+try {
+  const v = process.versions;
+  info(`NW.js    v${v.nw}`);
+  info(`Chromium v${v.chromium}`);
+  info(`Node     v${v.node}`);
+  info(`V8       v${v.v8}`);
+  ok("process.versions 可用");
+} catch (e) { bad(`process.versions 不可用: ${e.message}`); }
+
+try {
+  const win = nw.Window.get();
+  info(`nw.Window 可用, id=${win.id}`);
+  ok("nw 全局可用");
+  // manifest "show": false -> 首帧后显示窗口 (替代 Electron ready-to-show, 防启动闪白)
+  setTimeout(() => win.show(), 0);
+} catch (e) { bad(`nw 不可用: ${e.message}`); }
+
+// 2. 日志落盘: 按 process.execPath (= game\core\core.exe) 定位 game\logs\debug.log
+try {
+  const logDir = path.join(path.dirname(process.execPath), "..", "logs");
+  fs.mkdirSync(logDir, { recursive: true });
+  const logPath = path.join(logDir, "debug.log");
+  fs.writeFileSync(logPath, `BOOT ${new Date().toISOString()} nw=${process.versions.nw}\n`);
+  fs.appendFileSync(logPath, "SELFCHECK OK\n");
+  info(`日志 -> ${logPath}`);
+  ok("fs 写日志可用 (渲染层 Node)");
+} catch (e) { bad(`fs 写日志失败: ${e.message}`); }
+
+// 3. localStorage 持久化 (user-data-dir 默认 %LOCALAPPDATA%\<name>)
+try {
+  localStorage.setItem("selfcheck", "1");
+  const got = localStorage.getItem("selfcheck");
+  if (got === "1") ok("localStorage 可读写");
+  else bad("localStorage 读写不一致");
+} catch (e) { bad(`localStorage 失败: ${e.message}`); }
+
+// 4. pointer lock + ESC 行为验证 (NW.js 0.112 #7907: keydown 可拦截 ESC 保持锁定)
+const box = document.getElementById("lockbox");
+const pstate = { locked: false, escIntercepted: 0 };
+box.addEventListener("click", () => {
+  box.requestPointerLock().then(() => {
+    pstate.locked = true;
+    logLine(`[LOCK] 已锁定 (无 1.25s 冷却问题, 重复点击锁定/解锁应顺畅)`);
+  }).catch((err) => logLine(`[BAD]  锁定失败: ${err.message}`));
+});
+document.addEventListener("pointerlockchange", () => {
+  pstate.locked = document.pointerLockElement === box;
+  logLine(`[INFO] pointerlockchange: ${pstate.locked ? "已锁定" : "已解锁"}`);
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.code === "Escape") {
+    ev.preventDefault(); // #7907: 拦截 ESC, 保持 pointer lock
+    pstate.escIntercepted++;
+    logLine(`[ESC]  已拦截 #${pstate.escIntercepted} (preventDefault, 指针保持锁定)`);
+  }
+});
+// 主动退出测试: 按 P 解锁, 按 L 再锁 (验证冷却已移除: 立即重锁应成功)
+document.addEventListener("keydown", (ev) => {
+  if (ev.code === "KeyP") { document.exitPointerLock(); logLine("[KEY]  P: exitPointerLock"); }
+  if (ev.code === "KeyL") {
+    box.requestPointerLock().catch((err) => logLine(`[BAD]  重锁失败(冷却未移除?): ${err.message}`));
+    logLine("[KEY]  L: requestPointerLock 立即重锁");
+  }
+});
+
+// 5. 未捕获错误落盘
+window.onerror = (msg, src, line) => {
+  try { fs.appendFileSync(path.join(path.dirname(process.execPath), "..", "logs", "debug.log"), `ERROR ${msg} @ ${src}:${line}\n`); } catch {}
+};
+window.onunhandledrejection = (ev) => {
+  try { fs.appendFileSync(path.join(path.dirname(process.execPath), "..", "logs", "debug.log"), `REJECT ${ev.reason}\n`); } catch {}
+};
+ok("window.onerror / onunhandledrejection 落盘已挂接");
+
+logLine("=== NW.js 自检完成 ===");
+</script>
+</body>
+</html>

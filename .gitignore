@@ -1,0 +1,6 @@
+node_modules/
+nwjs/
+release/
+game/data/
+game/logs/
+game/core/
