@@ -11,6 +11,7 @@ const { execFile } = req("node:child_process");
 const gameRoot = path.join(path.dirname(process.execPath), "..");
 const logsDir = path.join(gameRoot, "logs");
 const coreDir = path.dirname(process.execPath);
+const configPath = path.join(gameRoot, "config", "settings.json");
 
 function ensureDirs(): void {
   for (const d of ["logs", "saves", "config", "assets"]) {
@@ -49,6 +50,21 @@ export function initShell(): void {
 export function appendLog(line: string): void {
   try {
     fs.appendFileSync(path.join(logsDir, "debug.log"), `${line}\n`, "utf8");
+  } catch {}
+}
+
+// 用户设置 -> game\config\settings.json (不存在返回空对象, 读写失败静默)
+export function readSettings(): Record<string, unknown> {
+  try {
+    return JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+export function writeSettings(s: Record<string, unknown>): void {
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(s, null, 2) + "\n", "utf8");
   } catch {}
 }
 

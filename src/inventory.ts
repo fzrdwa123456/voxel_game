@@ -1,5 +1,7 @@
 import grassTopUrl from "./assets/textures/block/grass_block_top.png";
 import type { BlockType } from "./blocks";
+import { t, onLangChange } from "./i18n";
+import { registerUIScalable } from "./uiscale";
 
 export interface InvItem {
   type: BlockType;
@@ -22,6 +24,7 @@ export class Inventory {
   private readonly bagEls: HTMLDivElement[] = [];
   private readonly panel: HTMLDivElement;
   private readonly onToggle: (open: boolean) => void;
+  private readonly title: HTMLDivElement;
   open = false;
 
   constructor(onToggle: (open: boolean) => void) {
@@ -46,7 +49,7 @@ export class Inventory {
     inner.style.cssText = "background:rgba(20,20,30,.92);border:2px solid #555;border-radius:6px;padding:14px;";
     const title = document.createElement("div");
     title.style.cssText = "color:#eee;font:600 16px/1.5 sans-serif;margin-bottom:8px;text-align:center;";
-    title.textContent = "背包 (点击格子放入选中物品栏槽)";
+    this.title = title;
     const grid = document.createElement("div");
     grid.style.cssText = "display:grid;grid-template-columns:repeat(9,48px);gap:3px;";
     for (let i = HOTBAR; i < TOTAL; i++) {
@@ -73,6 +76,20 @@ export class Inventory {
     });
 
     this.render();
+
+    const refresh = (): void => {
+      this.title.textContent = t("inv.title");
+    };
+    onLangChange(refresh);
+    refresh();
+
+    // 物品栏 + 背包框随界面缩放 (物品栏已有 translateX 居中, 需组合)
+    registerUIScalable((s) => {
+      hotbar.style.transform = `translateX(-50%) scale(${s})`;
+      hotbar.style.transformOrigin = "bottom center";
+      inner.style.transform = `scale(${s})`;
+      inner.style.transformOrigin = "center";
+    });
   }
 
   private makeSlot(): HTMLDivElement {

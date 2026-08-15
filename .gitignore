@@ -4,3 +4,4 @@ release/
 game/data/
 game/logs/
 game/core/
+game/config/

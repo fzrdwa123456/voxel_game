@@ -1,4 +1,6 @@
 // ===== HUD: 十字准星 + F3 调试面板 + 底部 toast (纯 DOM, 无外部依赖) =====
+import { t } from "./i18n";
+import { registerUIScalable } from "./uiscale";
 
 export interface DebugLog {
   label: string;
@@ -42,6 +44,12 @@ export class Hud {
     hud.append(hLine, vLine);
     document.body.appendChild(hud);
 
+    // 十字准星随界面缩放 (已有 translate 居中, 需组合; 缩放下准星变大)
+    registerUIScalable((s) => {
+      hLine.style.transform = `translate(-50%,-50%) scale(${s})`;
+      vLine.style.transform = `translate(-50%,-50%) scale(${s})`;
+    });
+
     // F3 调试面板 (默认隐藏)
     this.debug = document.createElement("div");
     this.debug.style.cssText =
@@ -74,20 +82,21 @@ export class Hud {
   updateDebug(info: DebugInfo): void {
     if (!this.debugVisible) return;
     const topFinite = info.top !== null && Number.isFinite(info.top);
-    const topStr = topFinite ? (info.top as number).toFixed(4) : "无";
+    const topStr = topFinite ? (info.top as number).toFixed(4) : t("f3.none");
     const diff = topFinite ? (info.feet - (info.top as number)).toFixed(4) : "-";
     const diffE = topFinite ? (info.feet - (info.top as number)).toExponential(2) : "-";
     let text =
-      `FPS: ${info.fps.toFixed(1)} (上限 ${info.fpsCap === 0 ? "不限" : info.fpsCap})\n` +
+      `FPS: ${info.fps.toFixed(1)} (${t("f3.cap")} ${info.fpsCap === 0 ? t("f3.unlimited") : info.fpsCap})\n` +
       `XYZ: ${info.x.toFixed(2)} / ${info.y.toFixed(2)} / ${info.z.toFixed(2)}\n` +
-      `方块: ${info.blocks}\n` +
+      `${t("f3.blocks")}: ${info.blocks}\n` +
       (info.gpuMs !== null
-        ? `GPU: ${info.gpuMs.toFixed(2)} ms ≈ 最高 ${Math.round(1000 / info.gpuMs)} FPS\n`
-        : `GPU: 不可用\n`) +
-      `物理: 模式=${info.mode} 地面=${info.onGround} vy=${info.vy.toFixed(2)} ` +
-      `feet=${info.feet.toFixed(4)} 顶=${topStr} 差=${diff} 差e=${diffE}\n`;
+        ? `GPU: ${info.gpuMs.toFixed(2)} ms ≈ ${t("f3.maxFps")} ${Math.round(1000 / info.gpuMs)} FPS\n`
+        : `GPU: ${t("f3.gpuNa")}\n`) +
+      `${t("f3.phys")}: ${t("f3.mode")}=${t(`mode.${info.mode}`)} ${t("f3.ground")}=${info.onGround} ` +
+      `vy=${info.vy.toFixed(2)} feet=${info.feet.toFixed(4)} ${t("f3.top")}=${topStr} ` +
+      `${t("f3.diff")}=${diff} ${t("f3.diffE")}=${diffE}\n`;
     for (const l of info.logs) {
-      if (l.lines.length > 0) text += `${l.label}(最近${l.lines.length}):\n${l.lines.join("\n")}\n`;
+      if (l.lines.length > 0) text += `${l.label}(${t("f3.recent")}${l.lines.length}):\n${l.lines.join("\n")}\n`;
     }
     this.debug.textContent = text;
   }

@@ -8,9 +8,17 @@ import { Hud } from "./hud";
 import { GamemodeController } from "./gamemode";
 import { initBlockEdit } from "./blockedit";
 import { PointerLock } from "./pointerlock";
-import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur } from "./shell";
+import { t, loadLang, getLang, onLangChange, type Lang } from "./i18n";
+import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } from "./uiscale";
+import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings } from "./shell";
 
 initShell();
+// 设置: 启动时从 settings.json 载入 (语言/界面缩放, 需在任何 UI 构建前), 变更时写回
+loadLang(readSettings().language);
+loadUIScaleMode(readSettings().uiScale);
+const saveSettings = (): void => writeSettings({ language: getLang(), uiScale: getUIScaleMode() });
+onLangChange(saveSettings);
+onUIScaleModeChange(saveSettings);
 
 const app = document.getElementById("app")!;
 
@@ -83,9 +91,9 @@ const onToggleGpuVsync = (on: boolean): boolean => {
   hud.showToast(
     ok
       ? on
-        ? "已关闭垂直同步，重启游戏生效"
-        : "已开启垂直同步，重启游戏生效"
-      : "保存失败，请检查写入权限",
+        ? t("toast.vsyncOff")
+        : t("toast.vsyncOn")
+      : t("toast.vsyncFail"),
   );
   sendLog(`GPU垂直同步 ${on ? "关闭" : "开启"} ${ok ? "已写入 manifest, 重启生效" : "写入失败"}`);
   return ok;
@@ -114,7 +122,7 @@ const mainMenu = new MainMenu({
     sendLog("MAINMENU 进入单人模式");
   },
   onMultiplayer: () => {
-    hud.showToast("多人模式尚未实现（占位）");
+    hud.showToast(t("toast.multiPlaceholder"));
     sendLog("MAINMENU 多人模式（占位）");
   },
   onExit: () => {
@@ -338,11 +346,11 @@ function renderFrame(): void {
       feet,
       top: Number.isFinite(top) ? top : null,
       logs: [
-        { label: "鼠标", lines: fps.mouseLog },
-        { label: "空格事件", lines: fps.spaceLog },
-        { label: "被挡事件", lines: fps.wallLog },
-        { label: "顶起事件", lines: fps.embedLog },
-        { label: "水平被挡", lines: fps.wallhLog },
+        { label: t("f3.logMouse"), lines: fps.mouseLog },
+        { label: t("f3.logSpace"), lines: fps.spaceLog },
+        { label: t("f3.logWall"), lines: fps.wallLog },
+        { label: t("f3.logEmbed"), lines: fps.embedLog },
+        { label: t("f3.logWallh"), lines: fps.wallhLog },
       ],
     });
   }
@@ -369,6 +377,7 @@ sendLog(`BOOT 渲染=rAF(60Hz) world=${world.meshes().length} 方块 winFocused=
 
 // 主界面: 先渲染一帧让世界显示在菜单背景后, 再显示主菜单。
 // 不启动循环/不锁鼠标, 点击"单人模式"才进入游戏。
+applyUIScale();
 renderer.render(scene, camera);
 mainMenu.show();
 pointerLock.applyCursor();

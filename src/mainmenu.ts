@@ -1,5 +1,7 @@
 // ===== 主界面 (标题 voxelcraft + 单人/多人/设置/退出) =====
 import { buildSettingsPanel, type SettingsCallbacks } from "./menu";
+import { t, onLangChange } from "./i18n";
+import { registerUIScalable } from "./uiscale";
 
 export interface MainMenuCallbacks extends SettingsCallbacks {
   onStartSingle: () => void;
@@ -13,6 +15,10 @@ export class MainMenu {
   private readonly root: HTMLDivElement;
   private readonly panel: HTMLDivElement;
   private readonly settingsPanel: HTMLDivElement;
+  private readonly singleBtn: HTMLButtonElement;
+  private readonly multiBtn: HTMLButtonElement;
+  private readonly settingsBtn: HTMLButtonElement;
+  private readonly quitBtn: HTMLButtonElement;
 
   constructor(cb: MainMenuCallbacks) {
     const btnBase =
@@ -22,9 +28,8 @@ export class MainMenu {
       "cursor:pointer;text-shadow:0 2px 0 rgba(0,0,0,.5);";
     const btnHover = "filter:brightness(1.25);";
     const btnDown = "transform:translateY(1px);";
-    const mkBtn = (label: string, onClick: () => void): HTMLButtonElement => {
+    const mkBtn = (onClick: () => void): HTMLButtonElement => {
       const b = document.createElement("button");
-      b.textContent = label;
       b.style.cssText = btnBase;
       b.onmouseover = () => (b.style.cssText = btnBase + btnHover);
       b.onmouseout = () => (b.style.cssText = btnBase);
@@ -52,15 +57,17 @@ export class MainMenu {
       "text-shadow:0 4px 0 #2a2a2a,0 6px 12px rgba(0,0,0,.6);";
     this.panel.appendChild(title);
 
-    this.panel.appendChild(mkBtn("单人模式", cb.onStartSingle));
-    this.panel.appendChild(mkBtn("多人模式", cb.onMultiplayer));
-    this.panel.appendChild(
-      mkBtn("设置", () => {
-        this.panel.style.display = "none";
-        this.settingsPanel.style.display = "block";
-      }),
-    );
-    this.panel.appendChild(mkBtn("退出游戏", cb.onExit));
+    this.singleBtn = mkBtn(cb.onStartSingle);
+    this.panel.appendChild(this.singleBtn);
+    this.multiBtn = mkBtn(cb.onMultiplayer);
+    this.panel.appendChild(this.multiBtn);
+    this.settingsBtn = mkBtn(() => {
+      this.panel.style.display = "none";
+      this.settingsPanel.style.display = "block";
+    });
+    this.panel.appendChild(this.settingsBtn);
+    this.quitBtn = mkBtn(cb.onExit);
+    this.panel.appendChild(this.quitBtn);
 
     this.settingsPanel = buildSettingsPanel({
       getFpsCap: cb.getFpsCap,
@@ -73,6 +80,21 @@ export class MainMenu {
       },
     });
     this.root.appendChild(this.settingsPanel);
+
+    const refresh = (): void => {
+      this.singleBtn.textContent = t("main.single");
+      this.multiBtn.textContent = t("main.multi");
+      this.settingsBtn.textContent = t("menu.settings");
+      this.quitBtn.textContent = t("main.quit");
+    };
+    onLangChange(refresh);
+    refresh();
+
+    // 主菜单面板 + 设置面板随界面缩放 (设置面板已在 buildSettingsPanel 内注册)
+    registerUIScalable((s) => {
+      this.panel.style.transform = `scale(${s})`;
+      this.panel.style.transformOrigin = "center";
+    });
   }
 
   get settingsVisible(): boolean {
