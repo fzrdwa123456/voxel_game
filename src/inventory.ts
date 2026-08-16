@@ -1,5 +1,5 @@
-import grassTopUrl from "./assets/textures/block/grass_block_top.png";
 import type { BlockType } from "./blocks";
+import { getBlockIcon } from "./blockicons";
 import { t, onLangChange } from "./i18n";
 import { registerUIScalable } from "./uiscale";
 
@@ -14,7 +14,7 @@ const TOTAL = HOTBAR + BAG;
 
 const ICON_COLOR: Record<BlockType, string> = {
   default: "#4caf50",
-  grass: `url(${grassTopUrl})`,
+  grass: "#6faa3f",
 };
 
 export class Inventory {
@@ -140,13 +140,20 @@ export class Inventory {
       const count = el.children[1] as HTMLDivElement;
       const it = this.slots[i];
       if (!it) {
-        icon.style.background = "transparent";
+        icon.style.backgroundColor = "transparent";
         icon.style.backgroundImage = "none";
         count.textContent = "";
       } else {
-        icon.style.background = ICON_COLOR[it.type];
-        icon.style.backgroundImage = it.type === "grass" ? ICON_COLOR.grass : "none";
+        icon.style.backgroundColor = ICON_COLOR[it.type];
+        icon.style.backgroundImage = "none";
         count.textContent = it.count > 1 ? `${it.count}` : "";
+        getBlockIcon(it.type).then((url) => {
+          const cur = this.slots[i];
+          if (url && cur && cur.type === it.type) {
+            icon.style.backgroundColor = "transparent";
+            icon.style.backgroundImage = `url(${url})`;
+          }
+        });
       }
     };
     this.hotbarEls.forEach((el, i) => {
