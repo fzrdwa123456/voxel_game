@@ -74,6 +74,8 @@ export class MainMenu {
       onFpsCap: cb.onFpsCap,
       getGpuVsyncState: cb.getGpuVsyncState,
       onToggleGpuVsync: cb.onToggleGpuVsync,
+      getWindowMode: cb.getWindowMode,
+      onSetWindowMode: cb.onSetWindowMode,
       onBack: () => {
         this.settingsPanel.style.display = "none";
         this.panel.style.display = "block";

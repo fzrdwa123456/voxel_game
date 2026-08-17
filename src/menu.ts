@@ -1,12 +1,15 @@
-// ===== 暂停菜单 + 共享设置面板 (帧率上限/垂直同步/语言/界面缩放), 主菜单也复用设置面板 =====
+// ===== 暂停菜单 + 共享设置面板 (帧率上限/垂直同步/语言/界面缩放/窗口模式), 主菜单也复用设置面板 =====
 import { t, getLang, setLang, onLangChange } from "./i18n";
 import { getUIScaleMode, setUIScaleMode, onUIScaleModeChange, registerUIScalable } from "./uiscale";
+import { onWindowModeChange, type WindowMode } from "./shell";
 
 export interface SettingsCallbacks {
   getFpsCap: () => number;
   onFpsCap: (cap: number) => void;
   getGpuVsyncState: () => boolean;
   onToggleGpuVsync: (on: boolean) => boolean;
+  getWindowMode: () => WindowMode;
+  onSetWindowMode: (mode: WindowMode) => void;
 }
 
 // 共享设置面板: 帧率上限滑条 + 垂直同步开关 + 语言选择 + 返回按钮 (暂停菜单/主菜单共用)
@@ -129,12 +132,43 @@ export function buildSettingsPanel(
   scaleRow.append(scaleBtns.small, scaleBtns.normal, scaleBtns.large, scaleBtns.auto);
   settingsPanel.appendChild(scaleRow);
 
+  // 窗口模式: 窗口化 / 全屏 (NW.js 运行时切换, 免重启)
+  const wmLabel = document.createElement("div");
+  wmLabel.style.cssText = "text-align:left;font-size:15px;margin:8px 0 4px;";
+  settingsPanel.appendChild(wmLabel);
+
+  const wmRow = document.createElement("div");
+  wmRow.style.cssText = "display:flex;gap:6px;margin:0 0 6px;";
+  const wmBtnStyle =
+    "flex:1;padding:8px;font:14px sans-serif;color:#fff;border:none;border-radius:6px;cursor:pointer;";
+  const mkWmBtn = (mode: WindowMode): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.style.cssText = wmBtnStyle;
+    b.onmouseover = () => (b.style.background = opts.getWindowMode() === mode ? "#3b83d6" : "#555");
+    b.onmouseout = () => (b.style.background = opts.getWindowMode() === mode ? "#4a9eff" : "#444");
+    b.onclick = () => opts.onSetWindowMode(mode);
+    return b;
+  };
+  const wmBtns: Record<WindowMode, HTMLButtonElement> = {
+    windowed: mkWmBtn("windowed"),
+    fullscreen: mkWmBtn("fullscreen"),
+  };
+  const renderWm = (): void => {
+    (Object.keys(wmBtns) as WindowMode[]).forEach((k) => {
+      wmBtns[k].textContent = t(`windowMode.${k}`);
+      wmBtns[k].style.background = opts.getWindowMode() === k ? "#4a9eff" : "#444";
+    });
+  };
+  wmRow.append(wmBtns.windowed, wmBtns.fullscreen);
+  settingsPanel.appendChild(wmRow);
+
   // 设置面板自身随界面缩放
   registerUIScalable((s) => {
     settingsPanel.style.transform = `scale(${s})`;
     settingsPanel.style.transformOrigin = "center";
   });
   onUIScaleModeChange(renderScale);
+  onWindowModeChange(renderWm);
 
   const backBtn = document.createElement("button");
   backBtn.style.cssText = btnStyle;
@@ -157,6 +191,8 @@ export function buildSettingsPanel(
     renderLang();
     scaleLabel.textContent = t("settings.uiScale");
     renderScale();
+    wmLabel.textContent = t("settings.windowMode");
+    renderWm();
     backBtn.textContent = t("menu.back");
   };
   onLangChange(refresh);
@@ -182,6 +218,8 @@ export class Menu {
     onToggleGpuVsync: (on: boolean) => boolean,
     getGpuVsyncState: () => boolean,
     getFpsCap: () => number,
+    getWindowMode: () => WindowMode,
+    onSetWindowMode: (mode: WindowMode) => void,
   ) {
     this.onResume = onResume;
 
@@ -230,6 +268,8 @@ export class Menu {
       onFpsCap,
       getGpuVsyncState,
       onToggleGpuVsync,
+      getWindowMode,
+      onSetWindowMode,
       onBack: () => {
         this.panel.style.display = "block";
       },

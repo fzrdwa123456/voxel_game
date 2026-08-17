@@ -1,18 +1,20 @@
 // ===== MC 式 3D 物品图标: WebGPU 渲染方块模型进渲染目标, 读回像素编码 PNG 缓存 =====
-// 与主渲染器同为 three/webgpu 构建; 光照模拟 MC ITEMS_3D (环境光 + 前上方向光)
+// 烘培尺寸 = 显示尺寸 × 界面缩放 × devicePixelRatio (1:1 显示, 零重采样, MC 同款)
+// 光照模拟 MC ITEMS_3D (环境光 + 前上方向光)
 import * as THREE from "three/webgpu";
 import grassTopUrl from "./assets/textures/block/grass_block_top.png";
 import grassSideUrl from "./assets/textures/block/grass_block_side.png";
 import dirtUrl from "./assets/textures/block/dirt.png";
 import type { BlockType } from "./blocks";
 
-const SIZE = 128;
 const HALF_VIEW = 0.85;
+const MIN_SIZE = 32;
+const MAX_SIZE = 256;
 
 let renderer: THREE.WebGPURenderer | null = null;
 let rendererReady: Promise<THREE.WebGPURenderer> | null = null;
-const cache = new Map<BlockType, string>();
-const pending = new Map<BlockType, Promise<string | null>>();
+const cache = new Map<string, string>();
+const pending = new Map<string, Promise<string | null>>();
 
 function getRenderer(): Promise<THREE.WebGPURenderer> {
   if (!rendererReady) {
@@ -55,16 +57,18 @@ async function buildScene(type: BlockType): Promise<THREE.Scene> {
 }
 
 /** 取方块 3D 图标 (dataURL), 首次调用异步渲染后缓存; 失败返回 null (调用方保持纯色兜底) */
-export function getBlockIcon(type: BlockType): Promise<string | null> {
-  const cached = cache.get(type);
+export function getBlockIcon(type: BlockType, sizePx: number): Promise<string | null> {
+  const size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(sizePx)));
+  const key = `${type}@${size}`;
+  const cached = cache.get(key);
   if (cached !== undefined) return Promise.resolve(cached);
-  const p = pending.get(type);
+  const p = pending.get(key);
   if (p) return p;
   const promise = (async (): Promise<string | null> => {
     try {
       const scene = await buildScene(type);
       const r = await getRenderer();
-      const rt = new THREE.WebGLRenderTarget(SIZE, SIZE, { samples: 4, depthBuffer: true });
+      const rt = new THREE.WebGLRenderTarget(size, size, { samples: 4, depthBuffer: true });
       rt.texture.colorSpace = THREE.SRGBColorSpace;
       const cam = new THREE.OrthographicCamera(-HALF_VIEW, HALF_VIEW, HALF_VIEW, -HALF_VIEW, 0.1, 10);
       cam.position.copy(new THREE.Vector3(1, 0.9, 1).normalize().multiplyScalar(3));
@@ -72,24 +76,29 @@ export function getBlockIcon(type: BlockType): Promise<string | null> {
       r.setRenderTarget(rt);
       r.render(scene, cam);
       r.setRenderTarget(null);
-      const pixels = await r.readRenderTargetPixelsAsync(rt, 0, 0, SIZE, SIZE);
+      const pixels = await r.readRenderTargetPixelsAsync(rt, 0, 0, size, size);
       rt.dispose();
       const canvas = document.createElement("canvas");
-      canvas.width = SIZE;
-      canvas.height = SIZE;
+      canvas.width = size;
+      canvas.height = size;
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
-      const clamped = new Uint8ClampedArray(SIZE * SIZE * 4);
-      clamped.set(pixels);
-      ctx.putImageData(new ImageData(clamped, SIZE, SIZE), 0, 0);
+      // WebGPU 读回 bytesPerRow 按 256 对齐, 非对齐尺寸有行填充, 需逐行去填充
+      const rowBytes = size * 4;
+      const paddedRowBytes = Math.ceil(rowBytes / 256) * 256;
+      const clamped = new Uint8ClampedArray(rowBytes * size);
+      for (let y = 0; y < size; y++) {
+        clamped.set(pixels.subarray(y * paddedRowBytes, y * paddedRowBytes + rowBytes), y * rowBytes);
+      }
+      ctx.putImageData(new ImageData(clamped, size, size), 0, 0);
       const url = canvas.toDataURL("image/png");
-      cache.set(type, url);
+      cache.set(key, url);
       return url;
     } catch {
       return null;
     }
   })();
-  pending.set(type, promise);
-  promise.finally(() => pending.delete(type));
+  pending.set(key, promise);
+  promise.finally(() => pending.delete(key));
   return promise;
 }

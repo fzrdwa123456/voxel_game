@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, copyFileSync, cpSync, readdirSync, renameSync, r
 import path from "node:path";
 
 const root = path.resolve(".");
-const nwDist = path.join(root, "nwjs", "nwjs-v0.112.0-win-x64");
+const nwDist = path.join(root, "nwjs", "nwjs-v0.114.2-win-x64");
 const dist = path.join(root, "dist");
 const release = path.join(root, "release", "VoxelEngineNWWeb");
 const core = path.join(release, "game", "core");

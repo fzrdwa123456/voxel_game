@@ -25,6 +25,7 @@ export class Inventory {
   private readonly panel: HTMLDivElement;
   private readonly onToggle: (open: boolean) => void;
   private readonly title: HTMLDivElement;
+  private iconSize = 40;
   open = false;
 
   constructor(onToggle: (open: boolean) => void) {
@@ -83,12 +84,14 @@ export class Inventory {
     onLangChange(refresh);
     refresh();
 
-    // 物品栏 + 背包框随界面缩放 (物品栏已有 translateX 居中, 需组合)
+    // 物品栏 + 背包框随界面缩放 (物品栏已有 translateX 居中, 需组合); 图标按 1:1 尺寸重烘
     registerUIScalable((s) => {
       hotbar.style.transform = `translateX(-50%) scale(${s})`;
       hotbar.style.transformOrigin = "bottom center";
       inner.style.transform = `scale(${s})`;
       inner.style.transformOrigin = "center";
+      this.iconSize = Math.max(32, Math.round(40 * s * window.devicePixelRatio));
+      this.refreshIcons();
     });
   }
 
@@ -134,6 +137,27 @@ export class Inventory {
     return it ? it.type : null;
   }
 
+  /** 按当前图标尺寸异步烘培并回填槽位图标 (带尺寸守卫, 避免缩放切换时旧尺寸晚到覆盖) */
+  private fetchIcon(el: HTMLDivElement, i: number): void {
+    const icon = el.children[0] as HTMLDivElement;
+    const it = this.slots[i];
+    if (!it) return;
+    const size = this.iconSize;
+    getBlockIcon(it.type, size).then((url) => {
+      const cur = this.slots[i];
+      if (url && cur && cur.type === it.type && this.iconSize === size) {
+        icon.style.backgroundColor = "transparent";
+        icon.style.backgroundImage = `url(${url})`;
+      }
+    });
+  }
+
+  /** 缩放变化时重烘所有已填充槽位图标 */
+  private refreshIcons(): void {
+    this.hotbarEls.forEach((el, i) => this.fetchIcon(el, i));
+    this.bagEls.forEach((el, i) => this.fetchIcon(el, i + HOTBAR));
+  }
+
   private render(): void {
     const draw = (el: HTMLDivElement, i: number): void => {
       const icon = el.children[0] as HTMLDivElement;
@@ -147,13 +171,7 @@ export class Inventory {
         icon.style.backgroundColor = ICON_COLOR[it.type];
         icon.style.backgroundImage = "none";
         count.textContent = it.count > 1 ? `${it.count}` : "";
-        getBlockIcon(it.type).then((url) => {
-          const cur = this.slots[i];
-          if (url && cur && cur.type === it.type) {
-            icon.style.backgroundColor = "transparent";
-            icon.style.backgroundImage = `url(${url})`;
-          }
-        });
+        this.fetchIcon(el, i);
       }
     };
     this.hotbarEls.forEach((el, i) => {

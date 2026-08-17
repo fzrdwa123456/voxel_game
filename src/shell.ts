@@ -164,6 +164,79 @@ export function getGpuVsyncState(): boolean {
   }
 }
 
+// ===== 窗口模式: 窗口化 / 全屏 (NW.js 运行时 kiosk 切换, 免重启) =====
+// 对齐 Electron 菜单 F11 (togglefullscreen role = win.setFullScreen 切换):
+// 不做任何窗口状态保存/恢复, 窗口化几何与最大化状态全部交给 Chromium 自行管理
+export type WindowMode = "windowed" | "fullscreen";
+
+const modeListeners = new Set<() => void>();
+
+// 当前窗口模式 (来自设置持久化, 默认窗口化)
+export function getWindowMode(): WindowMode {
+  return readSettings().windowMode === "fullscreen" ? "fullscreen" : "windowed";
+}
+
+export function onWindowModeChange(cb: () => void): void {
+  modeListeners.add(cb);
+}
+
+function notifyWindowMode(): void {
+  modeListeners.forEach((cb) => cb());
+}
+
+// 启动应用: 设置存的是全屏则进入全屏 (showWindow 后调用)。
+// 全屏内 ESC 不退出全屏 (游戏 ESC 用于弹菜单), 退出全屏走设置面板"窗口化"按钮
+export function applyWindowModeAtStart(): void {
+  try {
+    // NW.js Window API 类型定义缺失 isFullscreen/enterFullscreen, 用 any 调用
+    const win = nw.Window.get() as any;
+    if (getWindowMode() === "fullscreen" && !win.isFullscreen) {
+      win.enterKioskMode();
+      unTopmost();
+    }
+  } catch {}
+}
+
+// 进入全屏前的窗口是否处于最大化 (win.width/height 在最大化时=含边框的屏幕尺寸)
+let wasMaximizedBeforeFullscreen = false;
+
+// kiosk 进全屏会自动置顶 (HWND_TOPMOST), 立即取消, 恢复普通全屏 Z 序行为。
+// 优先用 NW.js 自带 JS 接口 setAlwaysOnTop(false) (chrome.windows.update alwaysOnTop 分支,
+// 不碰 state 逻辑)。备用: winctl.exe topmost 0 (SetWindowPos 同步原生, 已测可靠)
+function unTopmost(): void {
+  try {
+    const win = nw.Window.get() as any;
+    if (typeof win.setAlwaysOnTop === "function") win.setAlwaysOnTop(false);
+    // execFile(path.join(coreDir, "winctl.exe"), ["topmost", "0"], () => {});
+  } catch {}
+}
+
+// 切换窗口模式: 写设置 + 通知 UI + 运行时切换窗口 (免重启)。
+// 对齐 Electron togglefullscreen (win.setFullScreen 切换): 直接切换, 不做任何预处理。
+// 注意: NW.js kNWNewWin 下 win.enterFullscreen() → chrome.windows.update({state:"fullscreen"})
+// 内部会先 Restore() 取消最大化再全屏 (WindowsUpdateFunction), 产生 1280x720 中间帧且丢失最大化。
+// 改用 kiosk 模式: enterKioskMode/leaveKioskMode 走 C++ BrowserWidget::SetFullscreen 直连路径
+// (ProcessFullscreen 保存/恢复完整样式含 WS_MAXIMIZE), 无中间帧且退出自动恢复最大化, 与 Electron 一致。
+export function setWindowMode(mode: WindowMode): void {
+  try {
+    const s = readSettings();
+    s.windowMode = mode;
+    writeSettings(s);
+    notifyWindowMode();
+    const win = nw.Window.get() as any;
+    if (mode === "fullscreen") {
+      wasMaximizedBeforeFullscreen =
+        win.width >= screen.width || win.height >= screen.height;
+      if (!win.isFullscreen) {
+        win.enterKioskMode();
+        unTopmost();
+      }
+    } else {
+      if (win.isFullscreen) win.leaveKioskMode();
+    }
+  } catch {}
+}
+
 // 写入开关状态: on=true 加旗标(关闭垂直同步), false 移除; 返回是否成功
 export function setGpuVsyncState(on: boolean): boolean {
   try {

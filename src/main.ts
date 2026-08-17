@@ -10,15 +10,23 @@ import { initBlockEdit } from "./blockedit";
 import { PointerLock } from "./pointerlock";
 import { t, loadLang, getLang, onLangChange, type Lang } from "./i18n";
 import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } from "./uiscale";
-import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings } from "./shell";
+import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings, getWindowMode, setWindowMode, applyWindowModeAtStart, onWindowModeChange, type WindowMode } from "./shell";
 
 initShell();
-// 设置: 启动时从 settings.json 载入 (语言/界面缩放, 需在任何 UI 构建前), 变更时写回
+// 设置: 启动时从 settings.json 载入 (语言/界面缩放/窗口模式, 需在任何 UI 构建前), 变更时写回
 loadLang(readSettings().language);
 loadUIScaleMode(readSettings().uiScale);
-const saveSettings = (): void => writeSettings({ language: getLang(), uiScale: getUIScaleMode() });
+const saveSettings = (): void => {
+  // 读-改-写合并, 避免覆盖其他设置项 (windowMode 等)
+  const s = readSettings();
+  s.language = getLang();
+  s.uiScale = getUIScaleMode();
+  s.windowMode = getWindowMode();
+  writeSettings(s);
+};
 onLangChange(saveSettings);
 onUIScaleModeChange(saveSettings);
+onWindowModeChange(saveSettings);
 
 const app = document.getElementById("app")!;
 
@@ -39,6 +47,8 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 app.appendChild(renderer.domElement);
 // manifest "show": false -> 首帧渲染完成才显示窗口 (防启动闪白)
 showWindow();
+// 设置里存的是全屏: 进入全屏 (免重启), 并挂 ESC 退出全屏 -> 设置回窗口化的同步
+applyWindowModeAtStart();
 
 const fps = new FirstPersonCamera(camera, renderer.domElement);
 
@@ -99,6 +109,12 @@ const onToggleGpuVsync = (on: boolean): boolean => {
   return ok;
 };
 
+// 窗口模式: 运行时 enter/leaveFullscreen 切换 (免重启), 退出全屏走设置面板"窗口化"
+const onSetWindowMode = (mode: WindowMode): void => {
+  setWindowMode(mode);
+  sendLog(`窗口模式 ${mode === "fullscreen" ? "全屏" : "窗口化"}`);
+};
+
 const menu = new Menu(
   () => {
     // 回到游戏: 重新锁定鼠标 (ESC 后有冷却, 失败自动重试)
@@ -110,6 +126,8 @@ const menu = new Menu(
   onToggleGpuVsync,
   () => getGpuVsyncState(),
   () => fpsCap,
+  () => getWindowMode(),
+  onSetWindowMode,
 );
 
 // 主界面: 单人模式进入游戏; 多人模式占位; 设置/退出
@@ -133,6 +151,8 @@ const mainMenu = new MainMenu({
   onFpsCap,
   getGpuVsyncState,
   onToggleGpuVsync,
+  getWindowMode,
+  onSetWindowMode,
 });
 
 // 窗口离开前台 (最小化/切走/点击其他窗口): 立即弹暂停菜单 (仅真在游玩时)。
