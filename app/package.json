@@ -11,5 +11,5 @@
     "focus": true
   },
   "single-instance": true,
-  "chromium-args": "--autoplay-policy=no-user-gesture-required --no-user-gesture-required --enable-gpu-rasterization --ignore-gpu-blocklist --disable-gpu-vsync --disable-gesture-requirement-for-presentation"
+  "chromium-args": "--autoplay-policy=no-user-gesture-required --no-user-gesture-required --enable-gpu-rasterization --ignore-gpu-blocklist --disable-gpu-vsync --disable-gesture-requirement-for-presentation --disable-blink-features=RateLimitPointerLockRequests"
 }

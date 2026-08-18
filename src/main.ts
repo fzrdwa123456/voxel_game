@@ -50,7 +50,7 @@ showWindow();
 // 设置里存的是全屏: 进入全屏 (免重启), 并挂 ESC 退出全屏 -> 设置回窗口化的同步
 applyWindowModeAtStart();
 
-const fps = new FirstPersonCamera(camera, renderer.domElement);
+const fps = new FirstPersonCamera(camera, renderer.domElement, sendLog);
 
 const world = new BlockWorld(scene);
 for (let x = -1; x <= 1; x++) {
@@ -69,13 +69,14 @@ let pointerLock: PointerLock;
 const inv = new Inventory((open) => {
   if (open) {
     fps.prepareUnlock();
+    sendLog("UNLOCK 请求 (背包)");
     document.exitPointerLock();
     centerCursor();
     stopLoop();
   } else {
     // 下一轮事件循环再重锁: 避开当前 keydown 事件分发后的 Chromium"ESC 退出锁定"默认动作,
     // 否则背包按 ESC 关闭瞬间的同步锁定会被默认动作立即解锁, 并误触发弹菜单
-    setTimeout(() => pointerLock.relock(), 0);
+    setTimeout(() => pointerLock.relock("背包E"), 0);
     startLoop();
   }
   pointerLock.applyCursor();
@@ -89,6 +90,11 @@ pointerLock = new PointerLock({
   isMenuOpen: () => menu.visible || menu.settingsVisible || mainMenu.visible,
   isInvOpen: () => inv.open,
   sendLog,
+});
+
+// 诊断: 记录 pointer lock 状态变化时刻 (锁定/解锁完成), 用于核对光标居中竞态
+document.addEventListener("pointerlockchange", () => {
+  sendLog(`LOCKCHANGE ${document.pointerLockElement ? "已锁定" : "已解锁"}`);
 });
 
 // 设置回调 (暂停菜单/主菜单共用)
@@ -118,7 +124,7 @@ const onSetWindowMode = (mode: WindowMode): void => {
 const menu = new Menu(
   () => {
     // 回到游戏: 重新锁定鼠标 (ESC 后有冷却, 失败自动重试)
-    pointerLock.relock();
+    pointerLock.relock("菜单回游戏");
     pointerLock.applyCursor();
     sendLog("RESUME 回到游戏 -> 重锁");
   },
@@ -135,7 +141,7 @@ const mainMenu = new MainMenu({
   onStartSingle: () => {
     mainMenu.hide();
     pointerLock.applyCursor();
-    pointerLock.relock();
+    pointerLock.relock("主菜单进游戏");
     startLoop();
     sendLog("MAINMENU 进入单人模式");
   },
@@ -168,7 +174,7 @@ onWinBlur(() => {
 });
 onWinFocus(() => {
   if (started && !mainMenu.visible && !menu.visible && !menu.settingsVisible && !inv.open && !fps.locked) {
-    pointerLock.relock();
+    pointerLock.relock("窗口聚焦");
     sendLog("FOCUS 聚焦 -> 重锁");
   }
 });
@@ -190,10 +196,11 @@ document.addEventListener("keydown", (ev) => {
     menu.goBack();
   } else if (menu.visible) {
     menu.hide();
-    pointerLock.relock(); // 无冷却, 立即重锁
+    pointerLock.relock("ESC关菜单"); // 无冷却, 立即重锁
   } else {
     // 游戏内: 直接弹菜单 + 释放鼠标 (光标未捕获也能暂停)
     fps.prepareUnlock();
+    sendLog("UNLOCK 请求 (菜单)");
     document.exitPointerLock();
     menu.show();
     centerCursor();

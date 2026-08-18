@@ -33,6 +33,7 @@ export class FirstPersonCamera {
 
   private readonly camera: THREE.PerspectiveCamera;
   private readonly dom: HTMLElement;
+  private readonly log: (line: string) => void;
   private readonly sensitivity = 0.002;
   private readonly keys = new Set<string>();
   private world: BlockWorld | null = null;
@@ -74,9 +75,14 @@ export class FirstPersonCamera {
   /** 主动解锁前预置宽限期: 吞掉 exitPointerLock + SetCursorPos 竞态期间 (仍处于锁定态) 的合成位移 */
   private lockGraceUntil = 0;
 
-  constructor(camera: THREE.PerspectiveCamera, dom: HTMLElement) {
+  constructor(
+    camera: THREE.PerspectiveCamera,
+    dom: HTMLElement,
+    log: (line: string) => void = () => {},
+  ) {
     this.camera = camera;
     this.dom = dom;
+    this.log = log;
     this.position = camera.position.clone();
 
     const e = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
@@ -84,7 +90,10 @@ export class FirstPersonCamera {
     this.pitch = e.x;
 
     this.dom.addEventListener("click", () => {
-      if (this.clickLockAllowed) this.requestLock();
+      if (this.clickLockAllowed) {
+        this.log("LOCK click抢锁");
+        this.requestLock();
+      }
     });
     document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === this.dom;
@@ -165,21 +174,12 @@ export class FirstPersonCamera {
     this.lockGraceUntil = performance.now() + 100;
   }
 
-  /** 请求指针锁定: 优先 unadjustedMovement (Chromium 88+ 用原始位移, 绕过锁定瞬间的光标归位假位移),
-   *  平台不支持 (NotSupportedError) 或旧签名时退回普通 requestPointerLock, 保证一定能锁上。 */
+  /** 请求指针锁定: 直接普通 requestPointerLock。
+   *  不用 unadjustedMovement: NW.js 的 Windows raw input (RIDEV_INPUTSINK) 注册会间歇失败
+   *  -> NotSupportedError, 且同步回退的普通请求会被挂起的 browser 流程拒为 kAlreadyLocked (双失败)。
+   *  锁定瞬间的假位移由 skipFirstMove + lockGrace 兜住。 */
   private requestLock(): Promise<void> | undefined {
-    const el = this.dom as unknown as {
-      requestPointerLock(options?: { unadjustedMovement: boolean }): Promise<void> | void;
-    };
-    try {
-      const result = el.requestPointerLock({ unadjustedMovement: true });
-      if (result && typeof (result as Promise<void>).catch === "function") {
-        return (result as Promise<void>).catch(() => el.requestPointerLock() as Promise<void>);
-      }
-    } catch {
-      // options 参数不被支持: 退回普通锁定
-    }
-    return this.dom.requestPointerLock() as unknown as Promise<void> | undefined;
+    return this.dom.requestPointerLock() as Promise<void> | undefined;
   }
 
   lock(): Promise<void> | undefined {
