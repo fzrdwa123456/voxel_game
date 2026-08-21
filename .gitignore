@@ -5,3 +5,6 @@ game/data/
 game/logs/
 game/core/
 game/config/
+# rawinput Rust 构建产物 (libnode.dll=nwjs node.dll 副本, 其余由 objdump/dlltool 生成)
+rawinput/target/
+rawinput/lib/

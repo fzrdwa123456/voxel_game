@@ -1,0 +1,22 @@
+[package]
+name = "rawinput"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Win32 API 直接 extern 声明, 不引 windows-sys, 零版本兼容烦恼
+[dependencies.napi]
+version = "3"
+features = ["napi4"]
+
+[dependencies.napi-derive]
+version = "3"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+opt-level = 2

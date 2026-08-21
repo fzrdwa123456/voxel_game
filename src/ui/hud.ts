@@ -1,6 +1,6 @@
-// ===== HUD: 十字准星 + F3 调试面板 + 底部 toast (纯 DOM, 无外部依赖) =====
+﻿// ===== HUD: 十字准星 + F3 调试面板 + 底部 toast (纯 DOM, 无外部依赖) =====
 import { t } from "./i18n";
-import { registerUIScalable } from "./uiscale";
+import { uiStage } from "./uiscale";
 
 export interface DebugLog {
   label: string;
@@ -37,32 +37,26 @@ export class Hud {
     hud.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:10;";
     const hLine = document.createElement("div");
     hLine.style.cssText =
-      "position:absolute;left:50%;top:50%;width:20px;height:2px;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 2px rgba(0,0,0,.8);";
+      "position:absolute;left:50%;top:50%;width:1.25rem;height:0.125rem;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 0.125rem rgba(0,0,0,.8);";
     const vLine = document.createElement("div");
     vLine.style.cssText =
-      "position:absolute;left:50%;top:50%;width:2px;height:20px;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 2px rgba(0,0,0,.8);";
+      "position:absolute;left:50%;top:50%;width:0.125rem;height:1.25rem;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 0.125rem rgba(0,0,0,.8);";
     hud.append(hLine, vLine);
-    document.body.appendChild(hud);
-
-    // 十字准星随界面缩放 (已有 translate 居中, 需组合; 缩放下准星变大)
-    registerUIScalable((s) => {
-      hLine.style.transform = `translate(-50%,-50%) scale(${s})`;
-      vLine.style.transform = `translate(-50%,-50%) scale(${s})`;
-    });
+    uiStage.appendChild(hud);
 
     // F3 调试面板 (默认隐藏)
     this.debug = document.createElement("div");
     this.debug.style.cssText =
-      "position:fixed;top:8px;left:8px;z-index:20;color:#fff;font:12px/1.7 monospace;background:rgba(0,0,0,.55);padding:6px 10px;border-radius:4px;display:none;white-space:pre;";
-    document.body.appendChild(this.debug);
+      "position:fixed;top:0.5rem;left:0.5rem;z-index:20;color:#fff;font:0.75rem/1.7 var(--font-mono);background:rgba(0,0,0,.55);padding:0.375rem 0.625rem;border-radius:0.25rem;display:none;white-space:pre;";
+    uiStage.appendChild(this.debug);
 
     // 底部居中提示条 (toast): 设置类操作结果反馈, 约 2.5s 自动消失
     this.toast = document.createElement("div");
     this.toast.style.cssText =
-      "position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:60;color:#fff;" +
-      "font:14px/1.6 'Segoe UI',sans-serif;background:rgba(0,0,0,.8);padding:8px 18px;border-radius:6px;" +
+      "position:fixed;left:50%;bottom:3.75rem;transform:translateX(-50%);z-index:60;color:#fff;" +
+      "font:0.875rem/1.6 var(--font-ui);background:rgba(0,0,0,.8);padding:0.5rem 1.125rem;border-radius:0.375rem;" +
       "display:none;max-width:80vw;text-align:center;white-space:pre-wrap;";
-    document.body.appendChild(this.toast);
+    uiStage.appendChild(this.toast);
   }
 
   toggleDebug(): void {

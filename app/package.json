@@ -5,11 +5,13 @@
     "title": "VoxelEngineWeb",
     "width": 1280,
     "height": 720,
+    "min_width": 320,
+    "min_height": 240,
     "position": "center",
     "resizable": true,
     "show": false,
     "focus": true
   },
   "single-instance": true,
-  "chromium-args": "--autoplay-policy=no-user-gesture-required --no-user-gesture-required --enable-gpu-rasterization --ignore-gpu-blocklist --disable-gpu-vsync --disable-gesture-requirement-for-presentation --disable-blink-features=RateLimitPointerLockRequests"
+  "chromium-args": "--autoplay-policy=no-user-gesture-required --no-user-gesture-required --enable-gpu-rasterization --ignore-gpu-blocklist --disable-gpu-vsync --disable-gesture-requirement-for-presentation --disable-blink-features=RateLimitPointerLockRequests --remote-debugging-port=9222 --remote-allow-origins=*"
 }

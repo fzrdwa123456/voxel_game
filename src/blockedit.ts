@@ -2,7 +2,7 @@
 import * as THREE from "three/webgpu";
 import type { FirstPersonCamera } from "./camera";
 import type { BlockWorld } from "./blocks";
-import type { Inventory } from "./inventory";
+import type { Inventory } from "./ui/inventory";
 
 export interface BlockEditDeps {
   fps: FirstPersonCamera;

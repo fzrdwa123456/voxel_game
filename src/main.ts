@@ -1,30 +1,38 @@
 import * as THREE from "three/webgpu";
 import { FirstPersonCamera, EYE_HEIGHT } from "./camera";
 import { BlockWorld } from "./blocks";
-import { Inventory } from "./inventory";
-import { Menu } from "./menu";
-import { MainMenu } from "./mainmenu";
-import { Hud } from "./hud";
-import { GamemodeController } from "./gamemode";
+import { Inventory } from "./ui/inventory";
+import { Menu } from "./ui/menu";
+import { MainMenu } from "./ui/mainmenu";
+import { Hud } from "./ui/hud";
+import { GamemodeController } from "./ui/gamemode";
 import { initBlockEdit } from "./blockedit";
 import { PointerLock } from "./pointerlock";
-import { t, loadLang, getLang, onLangChange, type Lang } from "./i18n";
-import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } from "./uiscale";
+import { t, loadLang, getLang, onLangChange, type Lang } from "./ui/i18n";
+import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } from "./ui/uiscale";
+import { loadFont, getFontId, onFontChange } from "./ui/fonts";
 import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings, getWindowMode, setWindowMode, applyWindowModeAtStart, onWindowModeChange, type WindowMode } from "./shell";
 
+// 像素字体 (Fusion Pixel, OFL 开源): 比例字体 UI 通用, 等宽字体 F3/数量面板
+import "@fontsource/fusion-pixel-12px-proportional-sc";
+import "@fontsource/fusion-pixel-12px-monospaced-sc";
+
 initShell();
-// 设置: 启动时从 settings.json 载入 (语言/界面缩放/窗口模式, 需在任何 UI 构建前), 变更时写回
+// 设置: 启动时从 settings.json 载入 (语言/字体/界面缩放/窗口模式, 需在任何 UI 构建前), 变更时写回
 loadLang(readSettings().language);
+loadFont(readSettings().font);
 loadUIScaleMode(readSettings().uiScale);
 const saveSettings = (): void => {
   // 读-改-写合并, 避免覆盖其他设置项 (windowMode 等)
   const s = readSettings();
   s.language = getLang();
+  s.font = getFontId();
   s.uiScale = getUIScaleMode();
   s.windowMode = getWindowMode();
   writeSettings(s);
 };
 onLangChange(saveSettings);
+onFontChange(saveSettings);
 onUIScaleModeChange(saveSettings);
 onWindowModeChange(saveSettings);
 
@@ -58,6 +66,7 @@ for (let x = -1; x <= 1; x++) {
     world.set(x, 0, z, "grass");
   }
 }
+world.set(2, 0, 0, "missing");
 fps.setWorld(world);
 
 const hud = new Hud();
@@ -134,6 +143,16 @@ const menu = new Menu(
   () => fpsCap,
   () => getWindowMode(),
   onSetWindowMode,
+  () => {
+    // 回到主菜单: 停循环 + 恢复主界面绿色背景 (进游戏 startLoop 首帧自动恢复 3D)
+    started = false;
+    stopLoop();
+    renderer.setClearColor(0x00ff00);
+    renderer.clear();
+    mainMenu.show();
+    pointerLock.applyCursor();
+    sendLog("MENU 回到主菜单");
+  },
 );
 
 // 主界面: 单人模式进入游戏; 多人模式占位; 设置/退出
@@ -186,13 +205,13 @@ document.addEventListener("keydown", (ev) => {
   if (ev.code !== "Escape") return;
   ev.preventDefault(); // #7907: 拦截默认退出锁定, 由我们控制弹菜单/关菜单
   if (mainMenu.visible) {
-    // 主界面: ESC 只在设置面板里返回主菜单, 其余忽略
-    if (mainMenu.settingsVisible) mainMenu.goBack();
+    // 主界面: ESC 在任意子面板/设置面板里逐级返回, 其余忽略
+    if (mainMenu.settingsVisible || mainMenu.langVisible || mainMenu.packVisible) mainMenu.goBack();
     return;
   }
   if (inv.open) {
     inv.close();
-  } else if (menu.settingsVisible) {
+  } else if (menu.settingsVisible || menu.langVisible || menu.packVisible) {
     menu.goBack();
   } else if (menu.visible) {
     menu.hide();
@@ -402,9 +421,9 @@ function startLoop(): void {
 
 sendLog(`BOOT 渲染=rAF(60Hz) world=${world.meshes().length} 方块 winFocused=${winFocused()}`);
 
-// 主界面: 先渲染一帧让世界显示在菜单背景后, 再显示主菜单。
-// 不启动循环/不锁鼠标, 点击"单人模式"才进入游戏。
+// 主界面: 纯绿背景 (清屏色=绿, 只清屏不渲染世界)。进游戏 startLoop 首帧 render 自动恢复 3D 世界。
 applyUIScale();
-renderer.render(scene, camera);
+renderer.setClearColor(0x00ff00);
+renderer.clear();
 mainMenu.show();
 pointerLock.applyCursor();

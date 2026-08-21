@@ -1,9 +1,7 @@
 import * as THREE from "three/webgpu";
-import grassTopUrl from "./assets/textures/block/grass_block_top.png";
-import grassSideUrl from "./assets/textures/block/grass_block_side.png";
-import dirtUrl from "./assets/textures/block/dirt.png";
+import { resolveTexture, textureMissing } from "./textures";
 
-export type BlockType = "default" | "grass";
+export type BlockType = "default" | "grass" | "missing";
 
 const HALF = 0.5;
 
@@ -17,11 +15,6 @@ const FACES: { pos: number[][]; n: number[]; uv: number[][] }[] = [
   { pos: [[-HALF, -HALF, HALF], [HALF, -HALF, HALF], [HALF, HALF, HALF], [-HALF, HALF, HALF]], n: [0, 0, 1], uv: [[0, 0], [1, 0], [1, 1], [0, 1]] }, // +Z
   { pos: [[HALF, -HALF, -HALF], [-HALF, -HALF, -HALF], [-HALF, HALF, -HALF], [HALF, HALF, -HALF]], n: [0, 0, -1], uv: [[1, 0], [0, 0], [0, 1], [1, 1]] }, // -Z
 ];
-
-/** 草方块材质索引: 侧面=0 顶面=1 底面=2 */
-const GRASS_SIDE = 0;
-const GRASS_TOP = 1;
-const GRASS_DIRT = 2;
 
 function buildGeometry(faces: { f: number; m: number }[]): THREE.BufferGeometry {
   const pos: number[] = [];
@@ -68,10 +61,17 @@ export class BlockWorld {
   private readonly blocks = new Map<string, { mesh: THREE.Mesh; type: BlockType }>();
   private readonly mat: THREE.MeshLambertMaterial;
   private readonly grassMats: THREE.MeshLambertMaterial[];
+  private readonly missingMats: THREE.MeshLambertMaterial[];
+  // grass 贴图缺失(任一)时 grass 方块透明 (alphaTest 丢弃面片), 邻居面不得剔除
+  private readonly grassTransparent: boolean;
   private readonly scene: THREE.Scene;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    this.grassTransparent =
+      textureMissing("block/grass_block_side.png") ||
+      textureMissing("block/grass_block_top.png") ||
+      textureMissing("block/dirt.png");
     this.mat = new THREE.MeshLambertMaterial({ color: 0x4caf50 });
     const loader = new THREE.TextureLoader();
     const tex = (url: string): THREE.Texture => {
@@ -82,9 +82,17 @@ export class BlockWorld {
       return t;
     };
     this.grassMats = [
-      new THREE.MeshLambertMaterial({ map: tex(grassSideUrl), color: 0xffffff }),
-      new THREE.MeshLambertMaterial({ map: tex(grassTopUrl), color: 0xffffff }),
-      new THREE.MeshLambertMaterial({ map: tex(dirtUrl), color: 0xffffff }),
+      new THREE.MeshLambertMaterial({ map: tex(resolveTexture("block/grass_block_side.png")), color: 0xffffff, alphaTest: 0.5 }),
+      new THREE.MeshLambertMaterial({ map: tex(resolveTexture("block/grass_block_top.png")), color: 0xffffff, alphaTest: 0.5 }),
+      new THREE.MeshLambertMaterial({ map: tex(resolveTexture("block/dirt.png")), color: 0xffffff, alphaTest: 0.5 }),
+    ];
+    // 无贴图方块 (测试缺失兜底): 引用不存在的贴图路径 -> 落 missing.png (深紫)
+    // alphaTest: 兜底 1x1 透明 (alpha=0) 时面片直接丢弃 -> 方块隐形; missing.png 深紫 (alpha=255) 正常显示
+    const missingTex = tex(resolveTexture("block/nonexistent.png"));
+    this.missingMats = [
+      new THREE.MeshLambertMaterial({ map: missingTex, color: 0xffffff, alphaTest: 0.5 }),
+      new THREE.MeshLambertMaterial({ map: missingTex, color: 0xffffff, alphaTest: 0.5 }),
+      new THREE.MeshLambertMaterial({ map: missingTex, color: 0xffffff, alphaTest: 0.5 }),
     ];
   }
 
@@ -103,7 +111,10 @@ export class BlockWorld {
   set(x: number, y: number, z: number, type: BlockType = "default"): void {
     const k = BlockWorld.key(x, y, z);
     if (this.blocks.has(k)) return;
-    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), type === "grass" ? this.grassMats : this.mat);
+    const mesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      type === "grass" ? this.grassMats : type === "missing" ? this.missingMats : this.mat,
+    );
     mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
     this.blocks.set(k, { mesh, type });
     this.scene.add(mesh);
@@ -122,13 +133,15 @@ export class BlockWorld {
   }
 
   private faceMaterial(type: BlockType, f: number): number {
-    if (type !== "grass") return 0;
-    if (f === 2) return GRASS_TOP;
-    if (f === 3) return GRASS_DIRT;
-    return GRASS_SIDE;
+    if (type === "grass" || type === "missing") {
+      if (f === 2) return 1;
+      if (f === 3) return 2;
+      return 0;
+    }
+    return 0;
   }
 
-  /** 隐藏面剔除: 只保留与空气相邻的面 */
+  /** 隐藏面剔除: 只保留与空气相邻或与透明方块(缺失兜底)相邻的面 */
   private refresh(x: number, y: number, z: number): void {
     const entry = this.blocks.get(BlockWorld.key(x, y, z));
     if (!entry) return;
@@ -136,12 +149,17 @@ export class BlockWorld {
     const pushFace = (fi: number): void => {
       faces.push({ f: fi, m: this.faceMaterial(entry.type, fi) });
     };
-    if (!this.blocks.has(BlockWorld.key(x + 1, y, z))) pushFace(0);
-    if (!this.blocks.has(BlockWorld.key(x - 1, y, z))) pushFace(1);
-    if (!this.blocks.has(BlockWorld.key(x, y + 1, z))) pushFace(2);
-    if (!this.blocks.has(BlockWorld.key(x, y - 1, z))) pushFace(3);
-    if (!this.blocks.has(BlockWorld.key(x, y, z + 1))) pushFace(4);
-    if (!this.blocks.has(BlockWorld.key(x, y, z - 1))) pushFace(5);
+    const visible = (nx: number, ny: number, nz: number): boolean => {
+      const n = this.blocks.get(BlockWorld.key(nx, ny, nz));
+      if (!n) return true;
+      return n.type === "missing" || (n.type === "grass" && this.grassTransparent);
+    };
+    if (visible(x + 1, y, z)) pushFace(0);
+    if (visible(x - 1, y, z)) pushFace(1);
+    if (visible(x, y + 1, z)) pushFace(2);
+    if (visible(x, y - 1, z)) pushFace(3);
+    if (visible(x, y, z + 1)) pushFace(4);
+    if (visible(x, y, z - 1)) pushFace(5);
     entry.mesh.geometry.dispose();
     entry.mesh.geometry = buildGeometry(faces);
   }

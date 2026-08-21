@@ -1,7 +1,7 @@
-import type { BlockType } from "./blocks";
-import { getBlockIcon } from "./blockicons";
+﻿import type { BlockType } from "../blocks";
+import { getBlockIcon } from "../blockicons";
 import { t, onLangChange } from "./i18n";
-import { registerUIScalable } from "./uiscale";
+import { uiStage } from "./uiscale";
 
 export interface InvItem {
   type: BlockType;
@@ -15,6 +15,7 @@ const TOTAL = HOTBAR + BAG;
 const ICON_COLOR: Record<BlockType, string> = {
   default: "#4caf50",
   grass: "#6faa3f",
+  missing: "#800080",
 };
 
 export class Inventory {
@@ -32,27 +33,28 @@ export class Inventory {
     this.onToggle = onToggle;
     this.slots[0] = { type: "grass", count: 64 };
     this.slots[1] = { type: "default", count: 64 };
+    this.slots[2] = { type: "missing", count: 64 };
 
     const hotbar = document.createElement("div");
     hotbar.style.cssText =
-      "position:fixed;bottom:4px;left:50%;transform:translateX(-50%);z-index:31;display:flex;gap:3px;";
+      "position:fixed;bottom:0.25rem;left:50%;transform:translateX(-50%);z-index:31;display:flex;gap:0.1875rem;";
     for (let i = 0; i < HOTBAR; i++) {
       const el = this.makeSlot();
       hotbar.appendChild(el);
       this.hotbarEls.push(el);
     }
-    document.body.appendChild(hotbar);
+    uiStage.appendChild(hotbar);
 
     this.panel = document.createElement("div");
     this.panel.style.cssText =
       "position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;";
     const inner = document.createElement("div");
-    inner.style.cssText = "background:rgba(20,20,30,.92);border:2px solid #555;border-radius:6px;padding:14px;";
+    inner.style.cssText = "background:rgba(20,20,30,.92);border:0.125rem solid #555;border-radius:0.375rem;padding:0.875rem;";
     const title = document.createElement("div");
-    title.style.cssText = "color:#eee;font:600 16px/1.5 sans-serif;margin-bottom:8px;text-align:center;";
+    title.style.cssText = "color:#eee;font:600 1rem/1.5 var(--font-ui);margin-bottom:0.5rem;text-align:center;";
     this.title = title;
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(9,48px);gap:3px;";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(9,3rem);gap:0.1875rem;";
     for (let i = HOTBAR; i < TOTAL; i++) {
       const el = this.makeSlot();
       grid.appendChild(el);
@@ -60,7 +62,7 @@ export class Inventory {
     }
     inner.append(title, grid);
     this.panel.appendChild(inner);
-    document.body.appendChild(this.panel);
+    uiStage.appendChild(this.panel);
 
     document.addEventListener("keydown", (ev) => {
       if (ev.repeat) return;
@@ -83,28 +85,18 @@ export class Inventory {
     };
     onLangChange(refresh);
     refresh();
-
-    // 物品栏 + 背包框随界面缩放 (物品栏已有 translateX 居中, 需组合); 图标按 1:1 尺寸重烘
-    registerUIScalable((s) => {
-      hotbar.style.transform = `translateX(-50%) scale(${s})`;
-      hotbar.style.transformOrigin = "bottom center";
-      inner.style.transform = `scale(${s})`;
-      inner.style.transformOrigin = "center";
-      this.iconSize = Math.max(32, Math.round(40 * s * window.devicePixelRatio));
-      this.refreshIcons();
-    });
   }
 
   private makeSlot(): HTMLDivElement {
     const el = document.createElement("div");
     el.style.cssText =
-      "width:48px;height:48px;background:rgba(0,0,0,.35);border:2px solid rgba(255,255,255,.25);border-radius:4px;position:relative;display:flex;align-items:center;justify-content:center;";
+      "width:3rem;height:3rem;background:rgba(0,0,0,.35);border:0.125rem solid rgba(255,255,255,.25);border-radius:0.25rem;position:relative;display:flex;align-items:center;justify-content:center;";
     const icon = document.createElement("div");
-    icon.style.cssText = "width:40px;height:40px;background-size:cover;background-position:center;";
+    icon.style.cssText = "width:2.5rem;height:2.5rem;background-size:cover;background-position:center;";
     el.appendChild(icon);
     const count = document.createElement("div");
     count.style.cssText =
-      "position:absolute;right:2px;bottom:0;color:#fff;font:600 12px/1.4 monospace;text-shadow:0 1px 1px #000;";
+      "position:absolute;right:0.125rem;bottom:0;color:#fff;font:600 0.75rem/1.4 var(--font-mono);text-shadow:0 0.0625rem 0.0625rem #000;";
     el.appendChild(count);
     return el;
   }

@@ -1,0 +1,5 @@
+# 编译时自动指向 libnode.dll 所在目录 (napi-build 需要)
+# libnode.dll = NW.js node.dll 的副本, libnode.dll.a = 由它生成的导入库(引用名 node.dll)
+# 运行时 .node 模块从 core.exe 旁的 node.dll 解析符号
+[env]
+LIBNODE_PATH = { value = "E:\\VoxelEngineNWWeb\\rawinput\\lib", relative = false }

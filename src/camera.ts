@@ -74,6 +74,11 @@ export class FirstPersonCamera {
   private skipFirstMove = false;
   /** 主动解锁前预置宽限期: 吞掉 exitPointerLock + SetCursorPos 竞态期间 (仍处于锁定态) 的合成位移 */
   private lockGraceUntil = 0;
+  /** 窗口半在屏幕外时, pointer lock 被 Chromium 取消 → 自动切换到"自由鼠标"模式 (MC 式窗口化视角) */
+  private freeMouseActive = false;
+  private lastClientX = 0;
+  private lastClientY = 0;
+  private skipFirstFreeMove = false;
 
   constructor(
     camera: THREE.PerspectiveCamera,
@@ -95,33 +100,59 @@ export class FirstPersonCamera {
         this.requestLock();
       }
     });
-    document.addEventListener("pointerlockchange", () => {
+    // Original: this.locked = document.pointerLockElement === this.dom;
+// if (this.locked) this.skipFirstMove = true;
+document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === this.dom;
-      if (this.locked) this.skipFirstMove = true;
-    });
-    document.addEventListener("mousemove", (ev) => {
-      if (!this.locked) return;
-      // 解锁竞态窗口内 (prepareUnlock 到 pointerlockchange(false) 之间) 不转视角
-      if (performance.now() < this.lockGraceUntil) return;
-      if (this.skipFirstMove) {
-        this.skipFirstMove = false;
-        return;
+      if (this.locked) {
+        this.freeMouseActive = false;
+        this.skipFirstMove = true;
+      } else if (this.isWindowPartiallyOffScreen()) {
+        // 窗口半在屏幕外, pointer lock 被 Chromium 取消 → 自动切换到自由鼠标模式
+        this.freeMouseActive = true;
+        this.skipFirstFreeMove = true;
+      } else {
+        this.freeMouseActive = false;
       }
-      this.mmAccumX += ev.movementX;
-      this.mmAccumY += ev.movementY;
-      this.yaw -= ev.movementX * this.sensitivity;
-      this.pitch -= ev.movementY * this.sensitivity;
-      this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
-
-      // 鼠标事件日志 (限频 100ms): 关联鼠标输入与贴墙抖动
-      const now = performance.now();
-      if (now - this.lastMouseLog >= 100) {
-        this.lastMouseLog = now;
-        this.mouseLog.unshift(
-          `MOUSE#${this.mouseSeq++} mmX=${ev.movementX.toFixed(1)} mmY=${ev.movementY.toFixed(1)} ` +
-            `yaw=${this.yaw.toFixed(6)} pitch=${this.pitch.toFixed(6)}`,
-        );
-        if (this.mouseLog.length > 10) this.mouseLog.pop();
+    });
+    // Original: document.addEventListener("mousemove", (ev) => { if (!this.locked) return; ... });
+document.addEventListener("mousemove", (ev) => {
+      if (this.locked) {
+        // --- 指针锁定模式 (原逻辑) ---
+        if (performance.now() < this.lockGraceUntil) return;
+        if (this.skipFirstMove) {
+          this.skipFirstMove = false;
+          return;
+        }
+        this.mmAccumX += ev.movementX;
+        this.mmAccumY += ev.movementY;
+        this.yaw -= ev.movementX * this.sensitivity;
+        this.pitch -= ev.movementY * this.sensitivity;
+        this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
+        const now = performance.now();
+        if (now - this.lastMouseLog >= 100) {
+          this.lastMouseLog = now;
+          this.mouseLog.unshift(
+            `MOUSE#${this.mouseSeq++} mmX=${ev.movementX.toFixed(1)} mmY=${ev.movementY.toFixed(1)} ` +
+              `yaw=${this.yaw.toFixed(6)} pitch=${this.pitch.toFixed(6)}`,
+          );
+          if (this.mouseLog.length > 10) this.mouseLog.pop();
+        }
+      } else if (this.freeMouseActive) {
+        // --- 自由鼠标模式 (窗口半在屏幕外, Chromium 取消 pointer lock, 用 clientX/clientY 代替 movementX/Y) ---
+        if (this.skipFirstFreeMove) {
+          this.skipFirstFreeMove = false;
+          this.lastClientX = ev.clientX;
+          this.lastClientY = ev.clientY;
+          return;
+        }
+        const dx = ev.clientX - this.lastClientX;
+        const dy = ev.clientY - this.lastClientY;
+        this.lastClientX = ev.clientX;
+        this.lastClientY = ev.clientY;
+        this.yaw -= dx * this.sensitivity;
+        this.pitch -= dy * this.sensitivity;
+        this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
       }
     });
     document.addEventListener("keydown", (ev) => this.onKeyDown(ev));
@@ -184,6 +215,12 @@ export class FirstPersonCamera {
 
   lock(): Promise<void> | undefined {
     return this.requestLock();
+  }
+
+  /** 窗口是否部分在屏幕外 (Chromium 会因此拒绝 requestPointerLock) */
+  private isWindowPartiallyOffScreen(): boolean {
+    const rect = this.dom.getBoundingClientRect();
+    return rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight;
   }
 
   /** 水平重叠方块中, 玩家脚下(或头顶)最近的方块顶面 y 值 */
@@ -402,7 +439,8 @@ export class FirstPersonCamera {
   /** 固定步长物理: 只收固定 dt (与帧时序解耦, MC 式固定 tps), lock 时才推进 */
   stepPhysics(dt: number): void {
     this.prevPosition.copy(this.position);
-    if (!this.locked) return;
+// Original: if (!this.locked) return;
+    if (!this.locked && !this.freeMouseActive) return;
     if (this.mode === "fly") {
       if (this.flying) this.updateFly(dt);
       else this.updateWalk(dt);

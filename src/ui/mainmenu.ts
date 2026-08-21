@@ -1,7 +1,7 @@
-// ===== 主界面 (标题 voxelcraft + 单人/多人/设置/退出) =====
+﻿// ===== 主界面 (标题 voxelcraft + 单人/多人/设置/退出) =====
 import { buildSettingsPanel, type SettingsCallbacks } from "./menu";
 import { t, onLangChange } from "./i18n";
-import { registerUIScalable } from "./uiscale";
+import { uiStage } from "./uiscale";
 
 export interface MainMenuCallbacks extends SettingsCallbacks {
   onStartSingle: () => void;
@@ -14,7 +14,10 @@ export class MainMenu {
 
   private readonly root: HTMLDivElement;
   private readonly panel: HTMLDivElement;
+  private readonly title: HTMLDivElement;
   private readonly settingsPanel: HTMLDivElement;
+  private readonly langPanel: HTMLDivElement;
+  private readonly packPanel: HTMLDivElement;
   private readonly singleBtn: HTMLButtonElement;
   private readonly multiBtn: HTMLButtonElement;
   private readonly settingsBtn: HTMLButtonElement;
@@ -22,19 +25,23 @@ export class MainMenu {
 
   constructor(cb: MainMenuCallbacks) {
     const btnBase =
-      "display:block;width:100%;padding:12px;margin:8px 0;font:16px 'Segoe UI',sans-serif;color:#fff;" +
-      "background:linear-gradient(#6a6a6a,#4d4d4d);border:2px solid #1a1a1a;border-top-color:#7a7a7a;" +
-      "border-left-color:#7a7a7a;box-shadow:inset 0 1px 0 rgba(255,255,255,.15),0 2px 4px rgba(0,0,0,.6);" +
-      "cursor:pointer;text-shadow:0 2px 0 rgba(0,0,0,.5);";
+      "display:block;width:100%;padding:0.75rem;margin:0.5rem 0;font:1rem var(--font-ui);color:#fff;" +
+      "background:linear-gradient(#6a6a6a,#4d4d4d);border:0.125rem solid #1a1a1a;border-top-color:#7a7a7a;" +
+      "border-left-color:#7a7a7a;box-shadow:inset 0 0.0625rem 0 rgba(255,255,255,.15),0 0.125rem 0.25rem rgba(0,0,0,.6);" +
+      "cursor:pointer;text-shadow:0 0.125rem 0 rgba(0,0,0,.5);";
     const btnHover = "filter:brightness(1.25);";
-    const btnDown = "transform:translateY(1px);";
+    const btnDown = "transform:translateY(0.0625rem);";
     const mkBtn = (onClick: () => void): HTMLButtonElement => {
       const b = document.createElement("button");
       b.style.cssText = btnBase;
-      b.onmouseover = () => (b.style.cssText = btnBase + btnHover);
-      b.onmouseout = () => (b.style.cssText = btnBase);
-      b.onmousedown = () => (b.style.cssText = btnBase + btnHover + btnDown);
-      b.onmouseup = () => (b.style.cssText = btnBase + btnHover);
+      // hover/按下用单独属性, 不重写 cssText (避免冲掉布局系统的 translate 偏移)
+      b.onmouseover = () => (b.style.filter = "brightness(1.25)");
+      b.onmouseout = () => {
+        b.style.filter = "";
+        b.style.transform = "";
+      };
+      b.onmousedown = () => (b.style.transform = "translateY(0.0625rem)");
+      b.onmouseup = () => (b.style.filter = "brightness(1.25)");
       b.onclick = onClick;
       return b;
     };
@@ -43,19 +50,19 @@ export class MainMenu {
     this.root.style.cssText =
       "position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;" +
       "background:rgba(0,0,0,.5);";
-    document.body.appendChild(this.root);
+    uiStage.appendChild(this.root);
 
     this.panel = document.createElement("div");
     this.panel.style.cssText =
-      "width:300px;text-align:center;font-family:'Segoe UI',sans-serif;";
+      "width:18.75rem;text-align:center;font-family:var(--font-ui);";
     this.root.appendChild(this.panel);
 
-    const title = document.createElement("div");
-    title.textContent = "voxelcraft";
-    title.style.cssText =
-      "font-size:52px;font-weight:800;color:#fff;margin-bottom:28px;letter-spacing:2px;" +
-      "text-shadow:0 4px 0 #2a2a2a,0 6px 12px rgba(0,0,0,.6);";
-    this.panel.appendChild(title);
+    this.title = document.createElement("div");
+    this.title.textContent = "voxelcraft";
+    this.title.style.cssText =
+      "font-size:3.25rem;font-weight:800;color:#fff;margin-bottom:1.75rem;letter-spacing:0.125rem;" +
+      "text-shadow:0 0.25rem 0 #2a2a2a,0 0.375rem 0.75rem rgba(0,0,0,.6);";
+    this.panel.appendChild(this.title);
 
     this.singleBtn = mkBtn(cb.onStartSingle);
     this.panel.appendChild(this.singleBtn);
@@ -69,7 +76,7 @@ export class MainMenu {
     this.quitBtn = mkBtn(cb.onExit);
     this.panel.appendChild(this.quitBtn);
 
-    this.settingsPanel = buildSettingsPanel({
+    const panels = buildSettingsPanel({
       getFpsCap: cb.getFpsCap,
       onFpsCap: cb.onFpsCap,
       getGpuVsyncState: cb.getGpuVsyncState,
@@ -81,7 +88,12 @@ export class MainMenu {
         this.panel.style.display = "block";
       },
     });
+    this.settingsPanel = panels.settingsPanel;
+    this.langPanel = panels.langPanel;
+    this.packPanel = panels.packPanel;
     this.root.appendChild(this.settingsPanel);
+    this.root.appendChild(this.langPanel);
+    this.root.appendChild(this.packPanel);
 
     const refresh = (): void => {
       this.singleBtn.textContent = t("main.single");
@@ -91,20 +103,28 @@ export class MainMenu {
     };
     onLangChange(refresh);
     refresh();
-
-    // 主菜单面板 + 设置面板随界面缩放 (设置面板已在 buildSettingsPanel 内注册)
-    registerUIScalable((s) => {
-      this.panel.style.transform = `scale(${s})`;
-      this.panel.style.transformOrigin = "center";
-    });
   }
 
   get settingsVisible(): boolean {
     return this.settingsPanel.style.display === "block";
   }
 
+  get langVisible(): boolean {
+    return this.langPanel.style.display === "block";
+  }
+
+  get packVisible(): boolean {
+    return this.packPanel.style.display === "block";
+  }
+
   goBack(): void {
-    if (this.settingsVisible) {
+    if (this.packVisible) {
+      this.packPanel.style.display = "none";
+      this.settingsPanel.style.display = "block";
+    } else if (this.langVisible) {
+      this.langPanel.style.display = "none";
+      this.settingsPanel.style.display = "block";
+    } else if (this.settingsVisible) {
       this.settingsPanel.style.display = "none";
       this.panel.style.display = "block";
     }

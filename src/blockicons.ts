@@ -2,9 +2,7 @@
 // 烘培尺寸 = 显示尺寸 × 界面缩放 × devicePixelRatio (1:1 显示, 零重采样, MC 同款)
 // 光照模拟 MC ITEMS_3D (环境光 + 前上方向光)
 import * as THREE from "three/webgpu";
-import grassTopUrl from "./assets/textures/block/grass_block_top.png";
-import grassSideUrl from "./assets/textures/block/grass_block_side.png";
-import dirtUrl from "./assets/textures/block/dirt.png";
+import { resolveTexture } from "./textures";
 import type { BlockType } from "./blocks";
 
 const HALF_VIEW = 0.85;
@@ -46,10 +44,13 @@ async function buildScene(type: BlockType): Promise<THREE.Scene> {
   scene.add(dir);
   if (type === "grass") {
     // BoxGeometry 6 组 = +X -X +Y -Y +Z -Z, 与 blocks.ts 的 GRASS_SIDE/TOP/DIRT 一致
-    const side = new THREE.MeshLambertMaterial({ map: await loadTex(grassSideUrl), color: 0xffffff });
-    const top = new THREE.MeshLambertMaterial({ map: await loadTex(grassTopUrl), color: 0xffffff });
-    const dirt = new THREE.MeshLambertMaterial({ map: await loadTex(dirtUrl), color: 0xffffff });
+    const side = new THREE.MeshLambertMaterial({ map: await loadTex(resolveTexture("block/grass_block_side.png")), color: 0xffffff, alphaTest: 0.5 });
+    const top = new THREE.MeshLambertMaterial({ map: await loadTex(resolveTexture("block/grass_block_top.png")), color: 0xffffff, alphaTest: 0.5 });
+    const dirt = new THREE.MeshLambertMaterial({ map: await loadTex(resolveTexture("block/dirt.png")), color: 0xffffff, alphaTest: 0.5 });
     scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [side, side, top, dirt, side, side]));
+  } else if (type === "missing") {
+    const m = new THREE.MeshLambertMaterial({ map: await loadTex(resolveTexture("block/nonexistent.png")), color: 0xffffff, alphaTest: 0.5 });
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [m, m, m, m, m, m]));
   } else {
     scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x4caf50 })));
   }
