@@ -45,31 +45,10 @@ export class FirstPersonCamera {
   private spaceSeq = 0;
   /** 空格按键事件日志 (最近 10 条, 供 F3 调试面板显示) */
   readonly spaceLog: string[] = [];
-  /** 水平碰撞被挡事件日志 (最近 10 条, 残差极小=疑似空气墙) */
-  readonly wallLog: string[] = [];
-  private wallSeq = 0;
-  private lastWallLog = 0;
-  /** 垂直顶起事件日志 (最近 10 条, resolveEmbedding 触发时记录, 用于诊断贴墙抖动) */
-  readonly embedLog: string[] = [];
-  private embedSeq = 0;
-  /** 水平碰撞被挡事件日志 (每次 clamp 都记录, 不限残差, 用于诊断贴墙抖动) */
-  readonly wallhLog: string[] = [];
-  private wallhSeq = 0;
-  private lastWallhLog = 0;
-  /** 逐帧振荡诊断: clamp 触发后连续记录 60 帧位置(dt/x/z 精确值), 捕获亚 100ms 抖动 */
-  readonly burstLog: string[] = [];
-  private burstSeq = 0;
-  private burstActive = false;
-  private burstFrames = 0;
-  private burstTrigger = "";
-  private burstCooldownUntil = 0;
-  /** 鼠标移动事件日志 (限频 100ms, 供 F3 显示 + debug.log 关联输入与抖动) */
+  /** 鼠标移动事件日志 (限频 100ms, 供 F3 显示 + debug.log 关联输入) */
   readonly mouseLog: string[] = [];
   private mouseSeq = 0;
   private lastMouseLog = 0;
-  /** 本帧累计鼠标位移 (burst 每帧行用, 记录后清零) */
-  private mmAccumX = 0;
-  private mmAccumY = 0;
   /** 忽略锁定瞬间浏览器合成的一次假位移 (首帧 mousemove 不转视角) */
   private skipFirstMove = false;
   /** 主动解锁前预置宽限期: 吞掉 exitPointerLock + SetCursorPos 竞态期间 (仍处于锁定态) 的合成位移 */
@@ -128,8 +107,6 @@ export class FirstPersonCamera {
           this.skipFirstMove = false;
           return;
         }
-        this.mmAccumX += ev.movementX;
-        this.mmAccumY += ev.movementY;
         this.yaw -= ev.movementX * this.sensitivity;
         this.pitch -= ev.movementY * this.sensitivity;
         this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
@@ -177,15 +154,8 @@ export class FirstPersonCamera {
       }
     });
     if (push) {
-      const before = this.position.y;
       this.position.y = top + EYE_HEIGHT;
       if (this.vy < 0) this.vy = 0;
-      // 诊断日志: 每帧顶起 = 玩家斜向贴墙时横向穿墙被顶到墙顶 (贴墙抖动根因)
-      this.embedLog.unshift(
-        `EMBED#${this.embedSeq++} 顶起 y=${before.toFixed(4)}->${this.position.y.toFixed(4)} ` +
-          `feet=${feet.toFixed(4)} 顶=${top.toFixed(4)}`,
-      );
-      if (this.embedLog.length > 10) this.embedLog.pop();
     }
   }
 
@@ -337,8 +307,6 @@ export class FirstPersonCamera {
             const f = bx - HALF_WIDTH - EPS;
             if (f < nx) {
               nx = f;
-              this.logWall("X+", bx, by, feetY);
-              this.logWallH("X+", bx, by, bz, this.position.x, f, feetY);
             }
           }
         } else {
@@ -346,8 +314,6 @@ export class FirstPersonCamera {
             const f = bx + 1 + HALF_WIDTH + EPS;
             if (f > nx) {
               nx = f;
-              this.logWall("X-", bx, by, feetY);
-              this.logWallH("X-", bx, by, bz, this.position.x, f, feetY);
             }
           }
         }
@@ -371,8 +337,6 @@ export class FirstPersonCamera {
             const f = bz - HALF_WIDTH - EPS;
             if (f < nz) {
               nz = f;
-              this.logWall("Z+", bx, by, feetY);
-              this.logWallH("Z+", bx, by, bz, this.position.z, f, feetY);
             }
           }
         } else {
@@ -380,48 +344,12 @@ export class FirstPersonCamera {
             const f = bz + 1 + HALF_WIDTH + EPS;
             if (f > nz) {
               nz = f;
-              this.logWall("Z-", bx, by, feetY);
-              this.logWallH("Z-", bx, by, bz, this.position.z, f, feetY);
             }
           }
         }
       }
     });
     return nz;
-  }
-
-  /** 记录水平碰撞被挡事件: 仅当脚底与方块顶面残差 <1e-6 (疑似浮点空气墙), 限频 200ms */
-  private logWall(dir: string, bx: number, by: number, feetY: number): void {
-    const residual = by + 1 - feetY;
-    if (residual >= 1e-6) return;
-    const now = performance.now();
-    if (now - this.lastWallLog < 200) return;
-    this.lastWallLog = now;
-    this.wallLog.unshift(
-      `WALL#${this.wallSeq++} ${dir} 方块(bx=${bx},by=${by}) 残差=${residual.toExponential(2)} 被挡`,
-    );
-    if (this.wallLog.length > 10) this.wallLog.pop();
-  }
-
-  /** 水平碰撞被挡事件日志 (每次 clamp 都记录, 用于诊断贴墙抖动): 方向/方块/起点->结果/残差 */
-  private logWallH(dir: string, bx: number, by: number, bz: number, from: number, to: number, feetY: number): void {
-    const now = performance.now();
-    if (now - this.lastWallhLog < 200) return; // 限频 200ms 防刷屏
-    this.lastWallhLog = now;
-    this.wallhLog.unshift(
-      `WALLH#${this.wallhSeq++} ${dir} 方块(bx=${bx},by=${by},bz=${bz}) ` +
-        `feet=${feetY.toFixed(4)} ${from.toFixed(4)}->${to.toFixed(4)} ` +
-        `残差=${(by + 1 - feetY).toExponential(2)}`,
-    );
-    if (this.wallhLog.length > 10) this.wallhLog.pop();
-
-    // 逐帧振荡诊断: 首次 clamp 触发 burst (60 帧精确轨迹), 带 2s 冷却防连续刷屏
-    const now2 = performance.now();
-    if (!this.burstActive && now2 >= this.burstCooldownUntil) {
-      this.burstActive = true;
-      this.burstFrames = 0;
-      this.burstTrigger = `${dir} 方块(${bx},${by},${bz}) ${from.toFixed(6)}->${to.toFixed(6)}`;
-    }
   }
 
   /** 纯碰撞计算: 竖直移动 vyDelta 后 clamp 到的 feet 位置 (不碰 vy/onGround 状态) */
@@ -480,26 +408,6 @@ export class FirstPersonCamera {
       else this.updateWalk(dt);
     } else if (this.mode === "spectator") this.updateSpectator(dt);
     else this.updateWalk(dt);
-
-    // 逐帧振荡诊断: burst 激活期间每步记录位置, 攒满后标记结束 (保留完整轨迹供 main.ts 转发)
-    if (this.burstActive) {
-      this.burstFrames++;
-      this.burstLog.push(
-        `BURST#${this.burstSeq} F=${this.burstFrames} dt=${dt.toFixed(4)} ` +
-          `mmX=${this.mmAccumX.toFixed(1)} mmY=${this.mmAccumY.toFixed(1)} ` +
-          `yaw=${this.yaw.toFixed(6)} pitch=${this.pitch.toFixed(6)} ` +
-          `x=${this.position.x.toFixed(6)} y=${this.position.y.toFixed(6)} z=${this.position.z.toFixed(6)}`,
-      );
-      this.mmAccumX = 0;
-      this.mmAccumY = 0;
-      if (this.burstFrames >= 60) {
-        this.burstActive = false;
-        this.burstLog.push(`BURST#${this.burstSeq} 结束 触发:${this.burstTrigger}`);
-        this.burstSeq++;
-        this.burstCooldownUntil = performance.now() + 2000;
-      }
-    }
-    if (this.burstLog.length > 150) this.burstLog.shift();
   }
 
   /** 渲染同步: 相机位置在上一物理态与当前物理态间插值, 帧时序不均时移动依然平滑 */

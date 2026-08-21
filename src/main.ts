@@ -13,6 +13,8 @@ import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } fr
 import { loadFont, getFontId, onFontChange } from "./ui/fonts";
 import { initShell, sendLog, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings, getWindowMode, setWindowMode, applyWindowModeAtStart, onWindowModeChange, type WindowMode } from "./shell";
 import { startRawInput, centerCursor } from "./rawinput";
+import { DebugLogForwarder } from "./debuglog";
+import { PerfSampler } from "./perf";
 
 // 像素字体 (Fusion Pixel, OFL 开源): 比例字体 UI 通用, 等宽字体 F3/数量面板
 import "@fontsource/fusion-pixel-12px-proportional-sc";
@@ -141,8 +143,8 @@ const onSetWindowMode = (mode: WindowMode): void => {
   sendLog(`窗口模式 ${mode === "fullscreen" ? "全屏" : "窗口化"}`);
 };
 
-const menu = new Menu(
-  () => {
+const menu = new Menu({
+  onResume: () => {
     // 回到游戏: 重新锁定鼠标 (ESC 后有冷却, 失败自动重试)
     pointerLock.relock("菜单回游戏");
     pointerLock.applyCursor();
@@ -150,11 +152,11 @@ const menu = new Menu(
   },
   onFpsCap,
   onToggleGpuVsync,
-  () => getGpuVsyncState(),
-  () => fpsCap,
-  () => getWindowMode(),
+  getGpuVsyncState: () => getGpuVsyncState(),
+  getFpsCap: () => fpsCap,
+  getWindowMode: () => getWindowMode(),
   onSetWindowMode,
-  () => {
+  onToMainMenu: () => {
     // 回到主菜单: 停循环 + 恢复主界面绿色背景 (进游戏 startLoop 首帧自动恢复 3D)
     started = false;
     stopLoop();
@@ -164,7 +166,7 @@ const menu = new Menu(
     pointerLock.applyCursor();
     sendLog("MENU 回到主菜单");
   },
-);
+});
 
 // 主界面: 单人模式进入游戏; 多人模式占位; 设置/退出
 const mainMenu = new MainMenu({
@@ -265,23 +267,12 @@ let started = false;
 // 固定步长物理: 步长与时间累加器 (与帧时序解耦, MC 式固定 tps)
 const PHYS_DT = 1 / 120;
 let physAcc = 0;
-// GPU 渲染耗时测量 (trackTimestamp + resolveTimestampsAsync): EMA 平滑, 换算理论最高帧率
-let gpuRenderMs = 0;
-let gpuSamples = 0;
 // FPS 上限 (0=不限制): 物理仍按固定步长推进, 只门控渲染与统计
 let fpsCap = 0;
 let renderAcc = 0;
-// FPS 统计 (每 0.5s 更新一次)
-let fpsAccum = 0;
-let fpsFrames = 0;
-let fpsTimer = 0;
-// 日志转发: 各调试队列按序号增量转发到 debug.log
-let lastSpaceSeq = 0;
-let lastWallSeq = 0;
-let lastEmbedSeq = 0;
-let lastWallhSeq = 0;
-let lastBurstCount = 0;
-let lastMouseSeq = 0;
+// 性能采样 + 调试日志转发 (实现见各自模块)
+const perf = new PerfSampler();
+const dbgFwd = new DebugLogForwarder();
 
 function renderFrame(): void {
   timer.update();
@@ -306,13 +297,8 @@ function renderFrame(): void {
     renderAcc %= budget;
   }
 
-  fpsTimer += delta;
-  fpsFrames++;
-  if (fpsTimer >= 0.5) {
-    fpsAccum = fpsFrames / fpsTimer;
-    fpsFrames = 0;
-    fpsTimer = 0;
-
+  const s = perf.sample(delta);
+  if (s) {
     const p = fps.position;
     const feet = p.y - EYE_HEIGHT;
     const top = fps.groundTop();
@@ -324,79 +310,26 @@ function renderFrame(): void {
         `xyz=${p.x.toFixed(2)}/${p.y.toFixed(2)}/${p.z.toFixed(2)}`,
     );
 
-    // 转发新产生的空格事件日志 (SPACE#序号 递增)
-    for (const line of fps.spaceLog) {
-      const m = /^SPACE#(\d+)/.exec(line);
-      if (m && Number(m[1]) > lastSpaceSeq) {
-        sendLog(line);
-        lastSpaceSeq = Number(m[1]);
-      }
-    }
+    // 诊断队列增量转发 (SPACE/MOUSE, 实现在 debuglog.ts)
+    dbgFwd.forward(fps);
 
-    // 转发新产生的水平碰撞被挡日志 (WALL#序号 递增)
-    for (const line of fps.wallLog) {
-      const m = /^WALL#(\d+)/.exec(line);
-      if (m && Number(m[1]) > lastWallSeq) {
-        sendLog(line);
-        lastWallSeq = Number(m[1]);
-      }
-    }
-
-    // 转发新产生的垂直顶起日志 (EMBED#序号 递增)
-    for (const line of fps.embedLog) {
-      const m = /^EMBED#(\d+)/.exec(line);
-      if (m && Number(m[1]) > lastEmbedSeq) {
-        sendLog(line);
-        lastEmbedSeq = Number(m[1]);
-      }
-    }
-
-    // 转发新产生的水平碰撞被挡日志 (WALLH#序号 递增, 每次 clamp 都记录)
-    for (const line of fps.wallhLog) {
-      const m = /^WALLH#(\d+)/.exec(line);
-      if (m && Number(m[1]) > lastWallhSeq) {
-        sendLog(line);
-        lastWallhSeq = Number(m[1]);
-      }
-    }
-
-    // 转发逐帧振荡诊断轨迹 (burstLog 按序追加, 用已转发条数增量转发)
-    const bl = fps.burstLog;
-    if (lastBurstCount > bl.length) lastBurstCount = 0;
-    if (bl.length > lastBurstCount) {
-      for (let i = lastBurstCount; i < bl.length; i++) sendLog(bl[i]);
-      lastBurstCount = bl.length;
-    }
-
-    // 转发鼠标移动事件日志 (MOUSE#序号 递增, 限频 100ms)
-    for (const line of fps.mouseLog) {
-      const m = /^MOUSE#(\d+)/.exec(line);
-      if (m && Number(m[1]) > lastMouseSeq) {
-        sendLog(line);
-        lastMouseSeq = Number(m[1]);
-      }
-    }
-
-    // 读取 GPU 真实渲染耗时 (ms, 最近一帧总渲染 pass 时间), EMA 平滑; 设备不支持 timestamp-query 时返回 0
+    // 读取 GPU 真实渲染耗时 (ms, 最近一帧总渲染 pass 时间), EMA 平滑在 perf.ts
     renderer
       .resolveTimestampsAsync("render")
       .then((ms) => {
-        if (typeof ms === "number" && ms > 0) {
-          gpuSamples++;
-          gpuRenderMs = gpuSamples === 1 ? ms : gpuRenderMs * 0.7 + ms * 0.3;
-        }
+        if (typeof ms === "number" && ms > 0) perf.noteGpu(ms);
       })
       .catch(() => {});
 
     // F3 调试面板 (Hud 内部按需显示)
     hud.updateDebug({
-      fps: fpsAccum,
+      fps: s.fps,
       fpsCap,
       x: p.x,
       y: p.y,
       z: p.z,
       blocks: world.meshes().length,
-      gpuMs: gpuSamples > 0 ? gpuRenderMs : null,
+      gpuMs: s.gpuMs,
       mode: fps.mode,
       onGround: fps.onGround,
       vy: fps.vy,
@@ -405,9 +338,6 @@ function renderFrame(): void {
       logs: [
         { label: t("f3.logMouse"), lines: fps.mouseLog },
         { label: t("f3.logSpace"), lines: fps.spaceLog },
-        { label: t("f3.logWall"), lines: fps.wallLog },
-        { label: t("f3.logEmbed"), lines: fps.embedLog },
-        { label: t("f3.logWallh"), lines: fps.wallhLog },
       ],
     });
   }

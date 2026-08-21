@@ -14,6 +14,12 @@ export interface SettingsCallbacks {
   onSetWindowMode: (mode: WindowMode) => void;
 }
 
+// 暂停菜单回调: 设置面板六项 + 回到游戏/回到主菜单
+export interface MenuCallbacks extends SettingsCallbacks {
+  onResume: () => void;
+  onToMainMenu: () => void;
+}
+
 // 共享设置面板: 帧率上限滑条 + 垂直同步开关 + 语言合集 + 资源包合集 + 窗口模式 + 界面缩放 + 返回 (暂停菜单/主菜单共用)
 // 返回 { settingsPanel, langPanel, packPanel } 三个面板, 调用方挂到同一根容器切换显示
 export function buildSettingsPanel(
@@ -357,16 +363,17 @@ export class Menu {
   private readonly settingsBtn: HTMLButtonElement;
   private readonly toMainMenuBtn: HTMLButtonElement;
 
-  constructor(
-    onResume: () => void,
-    onFpsCap: (cap: number) => void,
-    onToggleGpuVsync: (on: boolean) => boolean,
-    getGpuVsyncState: () => boolean,
-    getFpsCap: () => number,
-    getWindowMode: () => WindowMode,
-    onSetWindowMode: (mode: WindowMode) => void,
-    onToMainMenu: () => void,
-  ) {
+  constructor(cb: MenuCallbacks) {
+    const {
+      onResume,
+      onFpsCap,
+      onToggleGpuVsync,
+      getGpuVsyncState,
+      getFpsCap,
+      getWindowMode,
+      onSetWindowMode,
+      onToMainMenu,
+    } = cb;
     this.onResume = onResume;
     this.onToMainMenu = onToMainMenu;
 
