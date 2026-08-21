@@ -9,6 +9,8 @@ import { sendLog } from "./shell";
 
 interface RawMouseNative {
   pollDelta(): { dx: number; dy: number };
+  /** 设置系统光标屏幕坐标 (进程内直调, 替代旧 cursor.exe 子进程) */
+  setCursorPos?(x: number, y: number): boolean;
 }
 
 const req = eval("require") as (id: string) => any;
@@ -22,6 +24,8 @@ export interface RawInputHandle {
 }
 
 let nativeListener: RawMouseNative | null = null;
+// 模块引用: set_cursor_pos 是模块级导出 (与 RawMouseListener 类并列), 不在实例上
+let nativeModule: { setCursorPos?(x: number, y: number): boolean } | null = null;
 
 export function startRawInput(): RawInputHandle {
   try {
@@ -29,6 +33,7 @@ export function startRawInput(): RawInputHandle {
     const coreDir = nodePath.dirname(process.execPath);
     const mod = req(nodePath.join(coreDir, "rawinput.node"));
     nativeListener = new mod.RawMouseListener();
+    nativeModule = mod;
     sendLog("RAWINPUT 插件加载成功, 原始输入监听已启动");
     return {
       available: true,
@@ -38,4 +43,18 @@ export function startRawInput(): RawInputHandle {
     sendLog(`RAWINPUT 加载失败 (无原始输入兜底, 不影响游戏): ${String(e)}`);
     return { available: false, poll: () => ({ dx: 0, dy: 0 }) };
   }
+}
+
+// 光标居中到窗口中心 (屏幕坐标): 菜单/背包打开时光标落在准星位置。
+// 优先走插件进程内直调 (~微秒); 旧 cursor.exe 子进程方案已停用, 源码保留在 launcher/cursor.c
+// (重新启用需恢复 npm run build:cursor 并解开下方注释)
+export function centerCursor(): void {
+  try {
+    const win = (globalThis as any).nw.Window.get();
+    const cx = Math.round(win.x + win.width / 2);
+    const cy = Math.round(win.y + win.height / 2);
+    if (nativeModule?.setCursorPos?.(cx, cy)) return;
+    // const { execFile } = req("node:child_process");
+    // execFile(nodePath.join(coreDir, "cursor.exe"), [String(cx), String(cy)], () => {});
+  } catch {}
 }

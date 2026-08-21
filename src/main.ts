@@ -11,8 +11,8 @@ import { PointerLock } from "./pointerlock";
 import { t, loadLang, getLang, onLangChange, type Lang } from "./ui/i18n";
 import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } from "./ui/uiscale";
 import { loadFont, getFontId, onFontChange } from "./ui/fonts";
-import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings, getWindowMode, setWindowMode, applyWindowModeAtStart, onWindowModeChange, type WindowMode } from "./shell";
-import { startRawInput } from "./rawinput";
+import { initShell, sendLog, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings, getWindowMode, setWindowMode, applyWindowModeAtStart, onWindowModeChange, type WindowMode } from "./shell";
+import { startRawInput, centerCursor } from "./rawinput";
 
 // 像素字体 (Fusion Pixel, OFL 开源): 比例字体 UI 通用, 等宽字体 F3/数量面板
 import "@fontsource/fusion-pixel-12px-proportional-sc";

@@ -105,6 +105,7 @@ extern "system" {
   fn PostMessageW(hwnd: isize, msg: u32, w_param: usize, l_param: isize) -> i32;
   fn GetCurrentThread() -> isize;
   fn SetThreadPriority(thread: isize, priority: i32) -> i32;
+  fn SetCursorPos(x: i32, y: i32) -> i32;
 }
 
 // ===== 全局累加器 (单实例使用; 多实例会合并计数, 游戏场景无影响) =====
@@ -172,6 +173,13 @@ unsafe extern "system" fn wnd_proc(hwnd: isize, msg: u32, w_param: usize, l_para
 
 fn to_napi_err(s: String) -> Error {
   Error::new(Status::GenericFailure, s)
+}
+
+/// 设置系统光标到屏幕坐标 (物理像素)。
+/// 替代旧 cursor.exe 子进程方案: 菜单/背包打开时把光标放到准星位置 (JS 算好坐标传入)
+#[napi]
+pub fn set_cursor_pos(x: i32, y: i32) -> bool {
+  unsafe { SetCursorPos(x, y) != 0 }
 }
 
 #[napi(object)]
