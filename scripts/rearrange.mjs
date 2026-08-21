@@ -37,6 +37,14 @@ execSync(`"${rceditBin}" "${coreExe}" --set-version-string ProductName "VoxelEng
 cpSync(dist, core, { recursive: true });
 copyFileSync(path.join(root, "app", "package.json"), path.join(core, "package.json"));
 
+// 原始鼠标输入原生插件 (rawinput/ Rust 构建) -> game\core\rawinput.node
+const rawNodeSrc = path.join(root, "rawinput", "target", "release", "rawinput.node");
+if (existsSync(rawNodeSrc)) {
+  copyFileSync(rawNodeSrc, path.join(core, "rawinput.node"));
+} else {
+  console.warn("警告: rawinput.node 不存在 (cd rawinput && cargo build --release), 游戏将无原始鼠标输入兜底");
+}
+
 // 默认贴图 -> 内置资源包 game\resourcepacks\default.zip (MC 式: 贴图封在压缩包里)
 const rpDir = path.join(release, "game", "resourcepacks");
 mkdirSync(rpDir, { recursive: true });

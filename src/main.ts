@@ -12,6 +12,7 @@ import { t, loadLang, getLang, onLangChange, type Lang } from "./ui/i18n";
 import { loadUIScaleMode, getUIScaleMode, onUIScaleModeChange, applyUIScale } from "./ui/uiscale";
 import { loadFont, getFontId, onFontChange } from "./ui/fonts";
 import { initShell, sendLog, centerCursor, showWindow, getGpuVsyncState, setGpuVsyncState, winFocused, quitApp, onWinFocus, onWinBlur, readSettings, writeSettings, getWindowMode, setWindowMode, applyWindowModeAtStart, onWindowModeChange, type WindowMode } from "./shell";
+import { startRawInput } from "./rawinput";
 
 // 像素字体 (Fusion Pixel, OFL 开源): 比例字体 UI 通用, 等宽字体 F3/数量面板
 import "@fontsource/fusion-pixel-12px-proportional-sc";
@@ -59,6 +60,16 @@ showWindow();
 applyWindowModeAtStart();
 
 const fps = new FirstPersonCamera(camera, renderer.domElement, sendLog);
+
+// 原始鼠标输入 (Rust 插件): 窗口半在屏幕外 pointer lock 被 Chromium 取消时接管视角旋转。
+// 8ms 定时取走累计增量 (主菜单等停循环期间也持续排空, 防止积压导致进游戏瞬间视角狂转),
+// 应用与否由 camera.applyRawInput 内部门控 (锁定态/菜单态丢弃)
+const rawInput = startRawInput();
+fps.rawInputActive = rawInput.available;
+setInterval(() => {
+  const d = rawInput.poll();
+  if (d.dx !== 0 || d.dy !== 0) fps.applyRawInput(d.dx, d.dy);
+}, 8);
 
 const world = new BlockWorld(scene);
 for (let x = -1; x <= 1; x++) {

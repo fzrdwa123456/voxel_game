@@ -76,9 +76,13 @@ export class FirstPersonCamera {
   private lockGraceUntil = 0;
   /** 窗口半在屏幕外时, pointer lock 被 Chromium 取消 → 自动切换到"自由鼠标"模式 (MC 式窗口化视角) */
   private freeMouseActive = false;
-  private lastClientX = 0;
-  private lastClientY = 0;
-  private skipFirstFreeMove = false;
+  /** 原始输入插件可用 (main.ts 启动成功后置 true): 自由鼠标模式改用 WM_INPUT 增量 */
+  rawInputActive = false;
+  /** 原始输入接管状态跟踪 (模式切换打一条日志便于排查) */
+  private rawTakeoverActive = false;
+  /** 屏幕越界检测结果缓存 (~120ms), 避免每条鼠标事件都触发布局/屏幕查询 */
+  private offscreenCacheUntil = 0;
+  private offscreenCached = false;
 
   constructor(
     camera: THREE.PerspectiveCamera,
@@ -100,9 +104,7 @@ export class FirstPersonCamera {
         this.requestLock();
       }
     });
-    // Original: this.locked = document.pointerLockElement === this.dom;
-// if (this.locked) this.skipFirstMove = true;
-document.addEventListener("pointerlockchange", () => {
+    document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === this.dom;
       if (this.locked) {
         this.freeMouseActive = false;
@@ -110,15 +112,17 @@ document.addEventListener("pointerlockchange", () => {
       } else if (this.isWindowPartiallyOffScreen()) {
         // 窗口半在屏幕外, pointer lock 被 Chromium 取消 → 自动切换到自由鼠标模式
         this.freeMouseActive = true;
-        this.skipFirstFreeMove = true;
       } else {
         this.freeMouseActive = false;
       }
     });
-    // Original: document.addEventListener("mousemove", (ev) => { if (!this.locked) return; ... });
-document.addEventListener("mousemove", (ev) => {
+    document.addEventListener("mousemove", (ev) => {
       if (this.locked) {
-        // --- 指针锁定模式 (原逻辑) ---
+        // --- 指针锁定模式 ---
+        // 窗口出屏 + 原始输入可用: 跳过 movementX (光标被钳制在屏幕内, 增量会归零且与原始输入双重计数)
+        const takeOver = this.rawInputShouldTakeOver();
+        this.syncRawTakeoverLog(takeOver);
+        if (takeOver) return;
         if (performance.now() < this.lockGraceUntil) return;
         if (this.skipFirstMove) {
           this.skipFirstMove = false;
@@ -138,21 +142,6 @@ document.addEventListener("mousemove", (ev) => {
           );
           if (this.mouseLog.length > 10) this.mouseLog.pop();
         }
-      } else if (this.freeMouseActive) {
-        // --- 自由鼠标模式 (窗口半在屏幕外, Chromium 取消 pointer lock, 用 clientX/clientY 代替 movementX/Y) ---
-        if (this.skipFirstFreeMove) {
-          this.skipFirstFreeMove = false;
-          this.lastClientX = ev.clientX;
-          this.lastClientY = ev.clientY;
-          return;
-        }
-        const dx = ev.clientX - this.lastClientX;
-        const dy = ev.clientY - this.lastClientY;
-        this.lastClientX = ev.clientX;
-        this.lastClientY = ev.clientY;
-        this.yaw -= dx * this.sensitivity;
-        this.pitch -= dy * this.sensitivity;
-        this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
       }
     });
     document.addEventListener("keydown", (ev) => this.onKeyDown(ev));
@@ -205,6 +194,20 @@ document.addEventListener("mousemove", (ev) => {
     this.lockGraceUntil = performance.now() + 100;
   }
 
+  /** 原始鼠标增量 (WM_INPUT, main.ts 定时轮询喂入)。
+   *  统一接管规则: 插件可用 + 无菜单/背包 + 窗口超出屏幕边界, 锁定与否不影响。
+   *  锁定中出屏 = movementX 已被光标钳制废掉, 正是原始输入补位的场景;
+   *  菜单态丢弃 (clickLockAllowed=false); 屏内锁定态丢弃 (movementX 正常工作, 防双重计数)。 */
+  applyRawInput(dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return;
+    const takeOver = this.rawInputShouldTakeOver();
+    this.syncRawTakeoverLog(takeOver);
+    if (!takeOver) return;
+    this.yaw -= dx * this.sensitivity;
+    this.pitch -= dy * this.sensitivity;
+    this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
+  }
+
   /** 请求指针锁定: 直接普通 requestPointerLock。
    *  不用 unadjustedMovement: NW.js 的 Windows raw input (RIDEV_INPUTSINK) 注册会间歇失败
    *  -> NotSupportedError, 且同步回退的普通请求会被挂起的 browser 流程拒为 kAlreadyLocked (双失败)。
@@ -217,10 +220,42 @@ document.addEventListener("mousemove", (ev) => {
     return this.requestLock();
   }
 
-  /** 窗口是否部分在屏幕外 (Chromium 会因此拒绝 requestPointerLock) */
+  /** 窗口是否超出所在显示器边界 (screen 坐标系, 结果缓存 ~120ms)。
+   *  关键背景: pointer lock 的光标钳制把光标圈在 窗口∩屏幕 区域内,
+   *  窗口半出屏时光标顶到虚拟桌面边缘 → Windows 停发位移 → movementX 归零 → 视角卡死;
+   *  且此时锁定并未被 Chromium 取消 (窗口仍算可见), pointerlockchange 不会触发。
+   *  WM_INPUT 相对增量不受光标钳制影响, 是唯一能继续转视角的输入源。 */
   private isWindowPartiallyOffScreen(): boolean {
-    const rect = this.dom.getBoundingClientRect();
-    return rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight;
+    const now = performance.now();
+    if (now >= this.offscreenCacheUntil) {
+      this.offscreenCacheUntil = now + 120;
+      // screen.* 属性跟随窗口当前所在显示器 (与 screenX 同为 CSS 像素坐标系)
+      // availLeft/availTop 是 Chromium 扩展 (多显示器偏移), 标准 TS 类型没有
+      const scr = screen as Screen & { availLeft?: number; availTop?: number };
+      const mLeft = scr.availLeft ?? 0;
+      const mTop = scr.availTop ?? 0;
+      const x = window.screenX;
+      const y = window.screenY;
+      this.offscreenCached =
+        x < mLeft - 1 ||
+        y < mTop - 1 ||
+        x + window.outerWidth > mLeft + screen.width + 1 ||
+        y + window.outerHeight > mTop + screen.height + 1;
+    }
+    return this.offscreenCached;
+  }
+
+  /** 原始输入是否应接管视角: 插件可用 + 无菜单/背包 + 窗口超出屏幕边界。锁定与否不影响。 */
+  private rawInputShouldTakeOver(): boolean {
+    return this.rawInputActive && this.clickLockAllowed && this.isWindowPartiallyOffScreen();
+  }
+
+  /** 接管模式切换时打一条日志 (排查用) */
+  private syncRawTakeoverLog(active: boolean): void {
+    if (active !== this.rawTakeoverActive) {
+      this.rawTakeoverActive = active;
+      this.log(active ? "RAWINPUT 接管 (movementX 挂起)" : "RAWINPUT 交还 movementX");
+    }
   }
 
   /** 水平重叠方块中, 玩家脚下(或头顶)最近的方块顶面 y 值 */
@@ -436,10 +471,9 @@ document.addEventListener("mousemove", (ev) => {
     }
   }
 
-  /** 固定步长物理: 只收固定 dt (与帧时序解耦, MC 式固定 tps), lock 时才推进 */
+  /** 固定步长物理: 只收固定 dt (与帧时序解耦, MC 式固定 tps), 锁定或自由鼠标模式才推进 */
   stepPhysics(dt: number): void {
     this.prevPosition.copy(this.position);
-// Original: if (!this.locked) return;
     if (!this.locked && !this.freeMouseActive) return;
     if (this.mode === "fly") {
       if (this.flying) this.updateFly(dt);
