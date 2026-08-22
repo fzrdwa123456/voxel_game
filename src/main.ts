@@ -15,16 +15,18 @@ import { initShell, sendLog, showWindow, getGpuVsyncState, setGpuVsyncState, win
 import { startRawInput, centerCursor } from "./rawinput";
 import { DebugLogForwarder } from "./debuglog";
 import { PerfSampler } from "./perf";
+import { loadBinds, getBind, getBindsAll, onBindsChange, isCapturing, buttonToAction, buttonToCode } from "./keybinds";
 
 // 像素字体 (Fusion Pixel, OFL 开源): 比例字体 UI 通用, 等宽字体 F3/数量面板
 import "@fontsource/fusion-pixel-12px-proportional-sc";
 import "@fontsource/fusion-pixel-12px-monospaced-sc";
 
 initShell();
-// 设置: 启动时从 settings.json 载入 (语言/字体/界面缩放/窗口模式, 需在任何 UI 构建前), 变更时写回
+// 设置: 启动时从 settings.json 载入 (语言/字体/界面缩放/窗口模式/按键绑定, 需在任何 UI 构建前), 变更时写回
 loadLang(readSettings().language);
 loadFont(readSettings().font);
 loadUIScaleMode(readSettings().uiScale);
+loadBinds(readSettings().keybinds);
 const saveSettings = (): void => {
   // 读-改-写合并, 避免覆盖其他设置项 (windowMode 等)
   const s = readSettings();
@@ -32,12 +34,14 @@ const saveSettings = (): void => {
   s.font = getFontId();
   s.uiScale = getUIScaleMode();
   s.windowMode = getWindowMode();
+  s.keybinds = getBindsAll();
   writeSettings(s);
 };
 onLangChange(saveSettings);
 onFontChange(saveSettings);
 onUIScaleModeChange(saveSettings);
 onWindowModeChange(saveSettings);
+onBindsChange(saveSettings);
 
 const app = document.getElementById("app")!;
 
@@ -104,7 +108,7 @@ const inv = new Inventory((open) => {
   pointerLock.applyCursor();
 });
 document.addEventListener("keydown", (ev) => {
-  if (ev.code === "KeyE" && !menu.visible && !menu.settingsVisible && !mainMenu.visible) inv.toggle();
+  if (ev.code === getBind("inventory") && !isCapturing() && !menu.visible && !menu.settingsVisible && !mainMenu.visible) inv.toggle();
 });
 
 pointerLock = new PointerLock({
@@ -217,14 +221,18 @@ onWinFocus(() => {
 document.addEventListener("keydown", (ev) => {
   if (ev.code !== "Escape") return;
   ev.preventDefault(); // #7907: 拦截默认退出锁定, 由我们控制弹菜单/关菜单
+  sendLog(
+    `ESC mainMenu=${mainMenu.visible} menu=${menu.visible} settings=${menu.settingsVisible} ` +
+      `lang=${menu.langVisible} pack=${menu.packVisible} keybind=${menu.keybindVisible} capturing=${isCapturing()}`,
+  );
   if (mainMenu.visible) {
     // 主界面: ESC 在任意子面板/设置面板里逐级返回, 其余忽略
-    if (mainMenu.settingsVisible || mainMenu.langVisible || mainMenu.packVisible) mainMenu.goBack();
+    if (mainMenu.settingsVisible || mainMenu.langVisible || mainMenu.packVisible || mainMenu.keybindVisible) mainMenu.goBack();
     return;
   }
   if (inv.open) {
     inv.close();
-  } else if (menu.settingsVisible || menu.langVisible || menu.packVisible) {
+  } else if (menu.settingsVisible || menu.langVisible || menu.packVisible || menu.keybindVisible) {
     menu.goBack();
   } else if (menu.visible) {
     menu.hide();
@@ -245,6 +253,28 @@ new GamemodeController(hud, fps, sendLog);
 
 // 左键破坏 / 右键放置
 initBlockEdit({ fps, world, camera, inv, sendLog });
+
+// ===== 鼠标键集中分发: 绑定到鼠标的动作从这里获得物理触发 =====
+// 移动/跳跃/潜行 → 伪码注入相机按键状态 (keyup 时释放); 背包 → 开关;
+// 破坏/放置跳过 (blockedit 有专用 mousedown 通道, 避免双重触发)
+document.addEventListener("mousedown", (ev) => {
+  if (isCapturing()) return; // 换绑选中期间不误触发
+  const action = buttonToAction(ev.button);
+  if (!action || action === "break" || action === "place") return;
+  const code = buttonToCode(ev.button)!;
+  if (action === "inventory") {
+    if (!menu.visible && !menu.settingsVisible && !mainMenu.visible) inv.toggle();
+    return;
+  }
+  fps.bindPress(code);
+});
+document.addEventListener("mouseup", (ev) => {
+  const code = buttonToCode(ev.button);
+  if (!code) return;
+  const action = buttonToAction(ev.button);
+  if (!action || action === "break" || action === "place" || action === "inventory") return;
+  fps.bindRelease(code);
+});
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 const dir = new THREE.DirectionalLight(0xffffff, 1);

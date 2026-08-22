@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
 import type { BlockWorld } from "./blocks";
+import { getBind } from "./keybinds";
 
 export const EYE_HEIGHT = 1.6;
 const HALF_WIDTH = 0.3;
@@ -247,41 +248,58 @@ export class FirstPersonCamera {
 
   private onKeyDown(ev: KeyboardEvent): void {
     this.keys.add(ev.code);
-    if (ev.code === "Space") {
-      const feet = this.position.y - EYE_HEIGHT;
-      const top = this.groundTop();
-      let action: string;
-      if (ev.repeat) {
-        action = "repeat(按住, 忽略)";
-      } else if (this.mode === "fly") {
-        const now = performance.now();
-        const isDouble = now - this.lastSpaceDown < DOUBLE_TAP_MS;
-        this.lastSpaceDown = now;
-        if (isDouble) {
-          this.flying = !this.flying;
-          this.vy = 0;
-          this.onGround = false;
-          action = `双击 → ${this.flying ? "开启" : "关闭"}飞行`;
-        } else if (!this.flying && this.onGround) {
-          this.vy = JUMP_SPEED;
-          action = "跳跃 vy=7.5 (未飞行)";
-        } else {
-          action = `无动作(飞行=${this.flying} 地面=${this.onGround})`;
-        }
-      } else if (this.mode === "walk" && this.onGround) {
-        this.vy = JUMP_SPEED;
-        action = "跳跃 vy=7.5";
-      } else {
-        action = `无动作(模式=${this.mode} 地面=${this.onGround})`;
-      }
-      this.spaceLog.unshift(
-        `SPACE#${this.spaceSeq++} ${ev.repeat ? "repeat" : "单按"} ` +
-          `模式=${this.mode} 飞行=${this.flying} 地面=${this.onGround} vy=${this.vy.toFixed(2)} ` +
-          `feet=${feet.toFixed(4)} 顶=${Number.isFinite(top) ? top.toFixed(4) : "无"} ` +
-          `差=${Number.isFinite(top) ? (feet - top).toFixed(4) : "-"} → ${action}`,
-      );
-      if (this.spaceLog.length > 10) this.spaceLog.pop();
+    if (ev.code === getBind("jump")) {
+      this.onJumpPress(ev.repeat);
     }
+  }
+
+  /** 跳跃键按下语义 (键盘 keydown 与鼠标注入共用): 双击切飞行 / 地面起跳 */
+  private onJumpPress(repeat: boolean): void {
+    const feet = this.position.y - EYE_HEIGHT;
+    const top = this.groundTop();
+    let action: string;
+    if (repeat) {
+      action = "repeat(按住, 忽略)";
+    } else if (this.mode === "fly") {
+      const now = performance.now();
+      const isDouble = now - this.lastSpaceDown < DOUBLE_TAP_MS;
+      this.lastSpaceDown = now;
+      if (isDouble) {
+        this.flying = !this.flying;
+        this.vy = 0;
+        this.onGround = false;
+        action = `双击 → ${this.flying ? "开启" : "关闭"}飞行`;
+      } else if (!this.flying && this.onGround) {
+        this.vy = JUMP_SPEED;
+        action = "跳跃 vy=7.5 (未飞行)";
+      } else {
+        action = `无动作(飞行=${this.flying} 地面=${this.onGround})`;
+      }
+    } else if (this.mode === "walk" && this.onGround) {
+      this.vy = JUMP_SPEED;
+      action = "跳跃 vy=7.5";
+    } else {
+      action = `无动作(模式=${this.mode} 地面=${this.onGround})`;
+    }
+    this.spaceLog.unshift(
+      `SPACE#${this.spaceSeq++} ${repeat ? "repeat" : "单按"} ` +
+        `模式=${this.mode} 飞行=${this.flying} 地面=${this.onGround} vy=${this.vy.toFixed(2)} ` +
+        `feet=${feet.toFixed(4)} 顶=${Number.isFinite(top) ? top.toFixed(4) : "无"} ` +
+        `差=${Number.isFinite(top) ? (feet - top).toFixed(4) : "-"} → ${action}`,
+    );
+    if (this.spaceLog.length > 10) this.spaceLog.pop();
+  }
+
+  /** 非键盘事件源的绑定码注入 (鼠标键等): 按下 */
+  bindPress(code: string): void {
+    if (this.keys.has(code)) return; // 已按住, 防重复触发跳跃语义
+    this.keys.add(code);
+    if (code === getBind("jump")) this.onJumpPress(false);
+  }
+
+  /** 非键盘事件源的绑定码注入: 松开 */
+  bindRelease(code: string): void {
+    this.keys.delete(code);
   }
 
   /** 切换游戏模式 (MC F3+F4 菜单调用) */
@@ -421,10 +439,10 @@ export class FirstPersonCamera {
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const move = new THREE.Vector3();
-    if (this.keys.has("KeyW")) move.add(forward);
-    if (this.keys.has("KeyS")) move.sub(forward);
-    if (this.keys.has("KeyD")) move.add(right);
-    if (this.keys.has("KeyA")) move.sub(right);
+    if (this.keys.has(getBind("forward"))) move.add(forward);
+    if (this.keys.has(getBind("back"))) move.sub(forward);
+    if (this.keys.has(getBind("right"))) move.add(right);
+    if (this.keys.has(getBind("left"))) move.sub(right);
     let dx = move.x;
     let dz = move.z;
     const len = Math.hypot(dx, dz);
@@ -438,8 +456,8 @@ export class FirstPersonCamera {
     this.position.z = this.sweepZ(dz, feet, this.position.x);
 
     let dy = 0;
-    if (this.keys.has("Space")) dy += FLY_SPEED * delta;
-    if (this.keys.has("ControlLeft") || this.keys.has("ControlRight")) {
+    if (this.keys.has(getBind("jump"))) dy += FLY_SPEED * delta;
+    if (this.keys.has(getBind("sneak"))) {
       dy -= FLY_SPEED * delta;
     }
     if (dy !== 0) {
@@ -453,16 +471,16 @@ export class FirstPersonCamera {
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const move = new THREE.Vector3();
-    if (this.keys.has("KeyW")) move.add(forward);
-    if (this.keys.has("KeyS")) move.sub(forward);
-    if (this.keys.has("KeyD")) move.add(right);
-    if (this.keys.has("KeyA")) move.sub(right);
+    if (this.keys.has(getBind("forward"))) move.add(forward);
+    if (this.keys.has(getBind("back"))) move.sub(forward);
+    if (this.keys.has(getBind("right"))) move.add(right);
+    if (this.keys.has(getBind("left"))) move.sub(right);
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(FLY_SPEED * delta);
       this.position.add(move);
     }
-    if (this.keys.has("Space")) this.position.y += FLY_SPEED * delta;
-    if (this.keys.has("ControlLeft") || this.keys.has("ControlRight")) {
+    if (this.keys.has(getBind("jump"))) this.position.y += FLY_SPEED * delta;
+    if (this.keys.has(getBind("sneak"))) {
       this.position.y -= FLY_SPEED * delta;
     }
   }
@@ -472,19 +490,19 @@ export class FirstPersonCamera {
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     let mx = 0;
     let mz = 0;
-    if (this.keys.has("KeyW")) {
+    if (this.keys.has(getBind("forward"))) {
       mx += forward.x;
       mz += forward.z;
     }
-    if (this.keys.has("KeyS")) {
+    if (this.keys.has(getBind("back"))) {
       mx -= forward.x;
       mz -= forward.z;
     }
-    if (this.keys.has("KeyD")) {
+    if (this.keys.has(getBind("right"))) {
       mx += right.x;
       mz += right.z;
     }
-    if (this.keys.has("KeyA")) {
+    if (this.keys.has(getBind("left"))) {
       mx -= right.x;
       mz -= right.z;
     }

@@ -18,6 +18,7 @@ export class MainMenu {
   private readonly settingsPanel: HTMLDivElement;
   private readonly langPanel: HTMLDivElement;
   private readonly packPanel: HTMLDivElement;
+  private readonly keybindPanel: HTMLDivElement;
   private readonly singleBtn: HTMLButtonElement;
   private readonly multiBtn: HTMLButtonElement;
   private readonly settingsBtn: HTMLButtonElement;
@@ -91,9 +92,11 @@ export class MainMenu {
     this.settingsPanel = panels.settingsPanel;
     this.langPanel = panels.langPanel;
     this.packPanel = panels.packPanel;
+    this.keybindPanel = panels.keybindPanel;
     this.root.appendChild(this.settingsPanel);
     this.root.appendChild(this.langPanel);
     this.root.appendChild(this.packPanel);
+    this.root.appendChild(this.keybindPanel);
 
     const refresh = (): void => {
       this.singleBtn.textContent = t("main.single");
@@ -117,12 +120,19 @@ export class MainMenu {
     return this.packPanel.style.display === "block";
   }
 
+  get keybindVisible(): boolean {
+    return this.keybindPanel.style.display === "block";
+  }
+
   goBack(): void {
     if (this.packVisible) {
       this.packPanel.style.display = "none";
       this.settingsPanel.style.display = "block";
     } else if (this.langVisible) {
       this.langPanel.style.display = "none";
+      this.settingsPanel.style.display = "block";
+    } else if (this.keybindVisible) {
+      this.keybindPanel.style.display = "none";
       this.settingsPanel.style.display = "block";
     } else if (this.settingsVisible) {
       this.settingsPanel.style.display = "none";
