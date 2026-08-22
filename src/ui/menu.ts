@@ -1,4 +1,4 @@
-﻿// ===== 暂停菜单 + 共享设置面板 (帧率上限/垂直同步/语言/界面缩放/窗口模式), 主菜单也复用设置面板 =====
+// ===== 暂停菜单 + 共享设置面板 (帧率上限/垂直同步/语言/界面缩放/窗口模式), 主菜单也复用设置面板 =====
 import { t, getLang, setLang, onLangChange } from "./i18n";
 import { getUIScaleMode, setUIScaleMode, onUIScaleModeChange, onResizeMerged, getCurrentScale, uiStage } from "./uiscale";
 import { getFontId, setFontId, onFontChange, type FontId } from "./fonts";
@@ -26,7 +26,6 @@ let chipDrag: {
   anchorY: number;
   moved: boolean;
 } | null = null;
-let suppressChipClick = false;
 let capHoverEl: HTMLButtonElement | null = null;
 
 function showCapLine(x1: number, y1: number, x2: number, y2: number): void {
@@ -62,25 +61,31 @@ function hideCapLine(): void {
   }
 }
 
-/** 落点探测: 命中任意实例注册的键帽返回其码 */
-function capCodeAtPoint(x: number, y: number): string | null {
+/** 落点探测: 命中任意实例注册的键帽, 返回码与实际命中的键帽元素。
+ *  高亮必须用这里带回的 el —— 按 code 回查会命中注册顺序靠前的隐藏面板孪生键帽 */
+function capHitAtPoint(x: number, y: number): { code: string; el: HTMLButtonElement } | null {
   const el = document.elementFromPoint(x, y) as HTMLElement | null;
   if (!el) return null;
   for (const c of capRegistry) {
-    if (c.el === el || c.el.contains(el)) return c.code;
+    if (c.el === el || c.el.contains(el)) return { code: c.code, el: c.el };
   }
   return null;
 }
 
 // 捕获态吞掉一切合成 click: 物理按下已经作为输入完成绑定,
 // 其后浏览器合成的 click 不得再触发任何面板交互 (芯片重选/键帽点选/返回按钮)。
-// 捕获相位注册: 先于所有元素自身的 onclick 执行; 非捕获期零影响。
+// 注意: 捕获态在 mousedown 阶段就已结束, 合成 click 到达时状态已空 ——
+// 因此还需要一次性抑制标志 suppressNextClick 配合 (onCaptureMouseDown 设置)。
+// chipDrag = 免捕获拖拽进行中: 同样吞掉一切点击 (防止另一只键的点击误触芯片/返回)。
+// 捕获相位注册: 先于所有元素自身的 onclick 执行; 两者皆无时零影响。
+let suppressNextClick = false;
 document.addEventListener(
   "click",
   (ev) => {
-    if (getCapturing()) {
+    if (getCapturing() || chipDrag || suppressNextClick) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
+      if (!chipDrag) suppressNextClick = false; // 消费即清 (拖拽中不消费, 保持原语义)
     }
   },
   true,
@@ -97,8 +102,8 @@ document.addEventListener("mousemove", (ev) => {
   }
   chipDrag.moved = true;
   showCapLine(chipDrag.anchorX, chipDrag.anchorY, ev.clientX, ev.clientY);
-  const hitCode = capCodeAtPoint(ev.clientX, ev.clientY);
-  const hitEl = hitCode ? capRegistry.find((c) => c.code === hitCode)?.el ?? null : null;
+  const hit = capHitAtPoint(ev.clientX, ev.clientY);
+  const hitEl = hit?.el ?? null;
   if (capHoverEl !== hitEl) {
     if (capHoverEl) capHoverEl.style.outline = "";
     capHoverEl = hitEl;
@@ -114,9 +119,9 @@ document.addEventListener("mouseup", (ev) => {
   hideCapLine();
   const dragged = Math.hypot(ev.clientX - anchorX, ev.clientY - anchorY) >= 6;
   if (!dragged) return; // 普通点击: 交给原生 click 走选中切换
-  suppressChipClick = true; // 吞掉拖拽结束后的第一颗原生 click
+  suppressNextClick = true; // 拖拽结束后的合成 click 由 click 屏蔽层按此标志吞掉 (消费即清)
   if (getCapturing()) return; // 拖拽中途进入了捕获态(异常路径), 放弃绑定
-  const code = capCodeAtPoint(ev.clientX, ev.clientY);
+  const code = capHitAtPoint(ev.clientX, ev.clientY)?.code ?? null;
   sendLog(`KBCAP 拖拽松手 action=${action} code=${code ?? "未命中"}`);
   if (!code) return; // 空白处松开: 无操作
   setBind(action, code);
@@ -127,6 +132,19 @@ document.addEventListener("mouseup", (ev) => {
   });
   sendLog(`KBCAP 拖拽绑定完成 (${code}, panels=${panels})`);
 });
+
+// 捕获态 / 免捕获拖拽进行中: 禁止一切滚轮滚动 (防止绑定选项列表位置漂移干扰操作)。
+// passive:false 必须显式声明 —— Chrome 对 document 级 wheel 监听默认被动化, 否则 preventDefault 无效
+document.addEventListener(
+  "wheel",
+  (ev) => {
+    if (getCapturing() || chipDrag) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+    }
+  },
+  { passive: false },
+);
 
 export interface SettingsCallbacks {
   getFpsCap: () => number;
@@ -398,7 +416,7 @@ export function buildSettingsPanel(
     { action: "place", labelKey: "bind.place" },
   ];
 
-  // 左右两栏: 左=键盘板 (主区+导航区+下方小键盘横排), 右=动作芯片竖排栏
+  // 左右两栏: 左=键盘板 (主区+导航区+下方小键盘横排), 右=互动按钮竖排栏 (固定上限高度, 内部滚动)
   const kbFlex = document.createElement("div");
   kbFlex.style.cssText = "display:flex;gap:0.75rem;align-items:flex-start;margin-bottom:0.625rem;";
   keybindPanel.appendChild(kbFlex);
@@ -409,9 +427,31 @@ export function buildSettingsPanel(
 
   const kbSide = document.createElement("div");
   kbSide.style.cssText =
-    "width:11rem;flex-shrink:0;display:flex;flex-direction:column;gap:0.375rem;" +
-    "background:#1a1a1a;border-radius:0.5rem;padding:0.625rem;";
+    "width:11rem;flex-shrink:0;max-height:20rem;display:flex;flex-direction:column;gap:0.375rem;" +
+    "background:#1a1a1a;border-radius:0.5rem;padding:0.625rem;overflow:hidden;";
   kbFlex.appendChild(kbSide);
+
+  // 标题 + 滚动芯片列表 (高度跟随左板, 动作增多时内部滚动不撑破面板)
+  const kbSideTitle = document.createElement("div");
+  kbSideTitle.style.cssText = "font-size:0.9375rem;color:#bbb;text-align:center;";
+  kbSide.appendChild(kbSideTitle);
+
+  const chipList = document.createElement("div");
+  chipList.id = "kb-chip-list";
+  chipList.style.cssText =
+    "flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0.375rem;padding-right:0.5rem;";
+  kbSide.appendChild(chipList);
+
+  // 细滚动条样式 (全局只注入一次)
+  if (!document.getElementById("kb-chip-scrollbar")) {
+    const st = document.createElement("style");
+    st.id = "kb-chip-scrollbar";
+    st.textContent =
+      "#kb-chip-list::-webkit-scrollbar{width:6px}" +
+      "#kb-chip-list::-webkit-scrollbar-thumb{background:#444;border-radius:3px}" +
+      "#kb-chip-list::-webkit-scrollbar-track{background:transparent}";
+    document.head.appendChild(st);
+  }
 
   const chipStyle =
     "width:100%;padding:0.4375rem 0.625rem;font:0.8125rem var(--font-ui);color:#fff;border:none;" +
@@ -423,22 +463,20 @@ export function buildSettingsPanel(
     chip.dataset.action = action; // 免捕获拖拽的落点识别标记
     // 拖拽起点: 按住互动按钮移动超过阈值即进入免捕获拖拽绑定
     chip.addEventListener("mousedown", (ev) => {
-      if (getCapturing()) return; // 已在捕获态时芯片点击交给全局捕获逻辑
-      suppressChipClick = false; // 新的按压使旧残留的吞除标志失效 (拖拽后的合成click落在容器上不会消费它)
+      // 捕获态: 放行冒泡到 document 的即时绑定处理器 (左/右键都能绑);
+      // 拖拽进行中: 忽略其他按键起手 (防劫持覆盖) —— 不掐断事件, 不影响任何下游
+      if (getCapturing() || chipDrag) return;
+      if (ev.button !== 0) return; // 仅左键可发起拖拽 (右键拖拽已移除)
       ev.preventDefault(); // 防止拖动时选中文字
       chipDrag = { action, button: ev.button, anchorX: ev.clientX, anchorY: ev.clientY, moved: false };
     });
     chip.onclick = () => {
-      if (suppressChipClick) {
-        suppressChipClick = false;
-        return;
-      }
       sendLog(`KBCAP 点击互动按钮 action=${action} capturing=${getCapturing() ?? "null"}`);
       if (getCapturing() === action) endCapture();
       else beginCapture(action);
       renderBinds();
     };
-    kbSide.appendChild(chip);
+    chipList.appendChild(chip);
     kbChips.set(action, chip);
   }
 
@@ -715,7 +753,10 @@ export function buildSettingsPanel(
     ev.preventDefault();
     ev.stopImmediatePropagation();
     endCapture();
-    suppressChipClick = true; // 吞掉紧随的合成 click, 防止芯片重新进入捕获态
+    // 一次性抑制标志: 合成 click 到达时捕获态已空, 由 click 屏蔽层按此标志拦截。
+    // 仅左键会合成 click —— 右/中/侧键只产生 contextmenu/auxclick, 若也置位,
+    // 标志将无人消费, 会吞掉下一次真实左键点击 (导致"要点两次才能再进捕获")
+    if (ev.button === 0) suppressNextClick = true;
     const code = buttonToCode(ev.button); // 左/中/右/X1/X2 统一立即绑定
     if (!code) return;
     setBind(action, code);
@@ -850,6 +891,7 @@ export function buildSettingsPanel(
     keybindBtn.textContent = t("settings.keybinds");
     kbTitle.textContent = t("settings.keybinds");
     kbHint.textContent = t("bind.hint");
+    kbSideTitle.textContent = t("settings.bindOptions");
     kbBackBtn.textContent = t("menu.back");
     renderBinds();
   };
